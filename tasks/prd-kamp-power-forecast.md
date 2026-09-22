@@ -170,14 +170,14 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - [ ] A+ 특징에 당일 생산량·당일 기상 파생 열 없음(과거 관측 기상 `prev_*`만), B에는 당일 생산량 열 있음(교란 테스트)
 - [ ] 무선행성: 원점 이후 값(Y[d:], X[d:])을 교란해도 d의 예측 동일
 - [ ] OOF 결과가 `oof_slots.csv`·`oof_days.csv`에 model `B1`, variant `main`으로 기록
-- [ ] **oracle-weather ablation** (variant `AWstar`, 프로토콜 `A+W*`): 대상일의 데이터 자체 `기온·습도·풍속·강수량_증분` 시간값(4슬롯 반복)을 알려진 값처럼 특징 `ob_temp, ob_hum, ob_wind, ob_rain`으로 더해 같은 f1–f4 OOF를 기록하고, `bootstrap.csv`에 `AWstar vs main`(B1) ΔMAE·Δ평균Brier CI를 쓴다. 결과는 보고서 제2·3장에서 "기상의 최대 기여에 대한 휴리스틱 상한(f1–f4처럼 표본이 작으면 특징을 더하는 것 자체가 손해일 수 있어 엄밀한 상한은 아님) = 외부 기상을 쓰지 않은 근거"로 제시한다(재검토 R9). **제출 모델에는 절대 들어가지 않는다**: `select_model` 후보·최종 적합·`test_predictions.csv`에 쓰이지 않음을 테스트(`test_run_all.py`에서 `ob_*` 열이 테스트 추론 특징에 없음) `[v2 §4.6, §4.7, A17, 판정 Q3]`
+- [ ] **oracle-weather ablation** (variant `AWstar`, 프로토콜 `A+W*`): 대상일의 데이터 자체 `기온·습도·풍속·강수량_증분` 시간값(4슬롯 반복)을 알려진 값처럼 특징 `ob_temp, ob_hum, ob_wind, ob_rain`으로 더해 같은 f1–f4 OOF를 기록하고, `bootstrap.csv`에 `AWstar vs main`(B1) ΔMAE·Δ평균Brier CI를 쓴다. 결과는 보고서 제2·3장에서 "기상의 최대 기여에 대한 휴리스틱 상한(f1–f4처럼 표본이 작으면 특징을 더하는 것 자체가 손해일 수 있어 엄밀한 상한은 아님) = 외부 기상을 쓰지 않은 근거"로 제시한다(재검토 R9). **제출 모델에는 절대 들어가지 않는다**: `gate_pass`/`select_variant` 후보·최종 적합·`test_predictions.csv`에 쓰이지 않음을 테스트(`test_run_all.py`에서 `ob_*` 열이 테스트 추론 특징에 없음) `[v2 §4.6, §4.7, A17, 판정 Q3]`
 - [ ] `uv run pytest -q` 통과
 
 ### US-008: 확률보정·판별력·부트스트랩·성공 기준
 **Description:** 연구자로서 위험확률을 누수 없이 보정하고, 판별력을 점검하고, 신뢰구간으로 B4가 벤치마크 B1을 이기는 성공 기준을 만족하는지 판정하고 싶다(만족하지 못하면 US-021의 개선 루프로 넘어간다).
 
 **Acceptance Criteria:**
-- [ ] `gmst/evaluate.py`: `platt_fit/platt_apply`(입력을 [1/(2N), 1−1/(2N)], N=2,000으로 클리핑 후 logit), `pav_fit/pav_apply`(isotonic), `calibrate_oof(days_df, method)`(leave-one-fold-out), `p_star`, `block_bootstrap`, `dm_test`, `climatology`, `risk_check`, `select_model`
+- [ ] `gmst/evaluate.py`: `platt_fit/platt_apply`(입력을 [1/(2N), 1−1/(2N)], N=2,000으로 클리핑 후 logit), `pav_fit/pav_apply`(isotonic), `calibrate_oof(days_df, method)`(leave-one-fold-out), `p_star`, `block_bootstrap`, `dm_test`, `climatology`, `risk_check`, `gate_pass`
 - [ ] 합성 데이터에서 Platt가 참 (a, b)를 ±0.1 이내 복원, PAV 출력 단조 + 알려진 예제와 일치
 - [ ] leave-one-fold-out: fold j 보정함수는 fold j 라벨을 뒤집어도 불변
 - [ ] 기후값: 무조건부(학습 기저율)와 **가동여부×요일유형 조건부**(학습 사용가능일 기준, 클래스 비면 가동여부만; 공휴일은 넣지 않음) 둘 다; `bss_cond = 1 − Brier/Brier_climcond` `[v2 §11.3, 판정 Q8]`
