@@ -1,0 +1,22 @@
+[project]
+name = "manufacture-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "polars>=1.44.2",
+    "torch>=2.14.0",
+]
+
+# Driver 535 (CUDA 12.2) cannot run the default cu130 build; cu126 runs via CUDA 12.x minor-version compatibility.
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
