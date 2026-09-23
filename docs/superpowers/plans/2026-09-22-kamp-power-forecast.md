@@ -2,27 +2,27 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Plan override (user instruction, binding):** this plan does **not** contain implementation code. Implementation is written by `fable`-model implementers. Every task gives: exact files, the interface contract (names, signatures, dtypes, column names, file schemas), the algorithm in precise prose/math with spec references, exact values, **complete runnable test code**, exact commands and expected output. Step pattern per task: write the test → run it (fails) → implement to the contract → run it (passes) → run the full suite → commit. The test code in this plan is the acceptance gate: do not weaken, delete or loosen an assertion. If a spec number in a test fails after a faithful implementation, stop and report it to the controller (do not edit the test).
+> **Current execution decision:** Astra implements the code with Ponytail and the reviewed contracts below. The old fable/commit instructions are superseded. The plan contains acceptance contracts; implementers write the minimum runnable checks, run the relevant tests, and do not commit or push unless separately asked.
 
-**Goal:** One command (`uv run python -m gmst.run_all`) turns the raw KAMP CSV into repaired 15-min data, a per-date policy table, rolling-origin OOF results for the model ladder (B0, B0′, BB, B1 benchmark, B2, B3, B4 + ablations), calibrated peak-risk checks, a bootstrap gate of the B4 family against the B1 benchmark with a pre-registered improvement loop (B4-H → B4-IO → B4-KAN) and B4-family selection, SCENARIO what-ifs in KRW, error analysis tables, and the sealed 1,344-row test prediction file.
+**Goal:** Development command (uv run python -m gmst.run_all) builds repaired data, OOF comparison, calibration, exploratory B4-vs-B1 gate, scenarios and analysis while keeping September sealed. Smoke exercises Aug 18–31 pseudo-test. Only the explicit final command (uv run python -m gmst.run_all --final), after selection is frozen, writes the 1,344-row September submission and test metrics.
 
-**Architecture:** A flat package `gmst/` of ~10 plain-function modules (no classes except the one `torch.nn.Module` for the HMM). Measurement repair lives in `preprocess.py`, day-level policy in `splits.py`, masking/protocols in `features.py`; every model is a plain dict of functions `{"name", "fit", "predict", ["posthoc"]}` driven by one rolling-origin loop in `evaluate.py`. `run_all.py` is the only writer of `results/` and the only place that unseals the test window. Notebooks only read files.
+**Architecture:** Keep the flat gmst package and function-based models. The numerical HMM may be split into flat hmm_core.py, training.py, forecast.py and states.py, with hmm.py as a thin public facade. The B1 row builder and hybrid centre may similarly live in flat lgbm_features.py and hybrid.py, reexported by features.py and baselines.py. No registry, hierarchy or framework. The runner may use flat run_development.py and run_outputs.py for orchestration and file writing if needed; run_all.py remains the public entry and the sole real-unseal call site. Retain every original API from commit 6619558 unless this reviewed plan explicitly changes its signature or return contract.
 
 **Tech Stack:** Python ≥3.13, uv, polars, numpy, torch 2.14.0+cu126 (cuda if available else cpu), lightgbm (native `lgb.train` API), matplotlib (notebooks), pytest (dev).
 
-**Spec:** `tasks/prd-kamp-power-forecast.md` (PRD, primary for tasks: US-001…US-020, FR-1…FR-106, DC1…DC16) + `document/KAMP_GMST_Power_project_proposal_v2.md` (v2: methods, math, A1–A32) + `.sdd/decisions.md` + rulings in `.sdd/progress.md` (later lines win; R1–R11 of the consistency re-review are binding) + `claudedocs/research_copy_vs_outlier_20260922.md` + `.sdd/kepco_tariff_2021.md`. The spec is frozen at commit `a82ea9d` (B1 = benchmark only, pre-registered improvement loop US-021 / FR-107–FR-110). Executors read the PRD and v2 alongside this plan. Where this plan pins a definition the spec leaves open, the pin is marked **[plan pin]** and listed under "Spec issues found".
+**Spec:** PRD US-001…US-021 (19 active), FR-1…FR-110 (104 active), DC1…DC16; proposal v2 A1…A36; approved review dated 2026-09-23; later decisions in .sdd/progress.md. The review corrections in this plan supersede conflicting historical change-log rows.
 
 ## Global Constraints
 
 - Work only inside the worktree `WT = /home/user/manufacture_ai/.claude/worktrees/kamp-core`, branch `kamp-core`. Run every command from `WT` with `uv run …`. The first `uv run` creates `WT/.venv` from the uv cache.
-- Commits: `git add` **only the files the task lists** (another agent may have uncommitted edits to `document/` and `tasks/` in this worktree — never stage them). Commit messages end **without** `Co-Authored-By` or `Claude-Session` trailers (user rule).
+- Git operations: no commits, staging, pushing, or PR creation in this implementation request. Keep the worktree reviewable.
 - Dependencies: only `uv add lightgbm` (runtime) and `uv add --dev pytest` (dev). Never add or import `scipy`, `sklearn`/`scikit-learn`, `pandas`, `requests`. Keep the torch `[tool.uv.sources]` / `[[tool.uv.index]]` (pytorch-cu126) blocks unchanged (FR-1, FR-2).
 - LightGBM: native API only (`lightgbm.Dataset`, `lightgbm.train`); the sklearn wrapper needs scikit-learn and is forbidden. Params = library defaults + `{"seed": 0, "deterministic": True, "force_col_wise": True, "verbose": -1}`, `num_boost_round=100` unless a smoke/test argument lowers it (FR-5, FR-49).
 - ponytail (binding style): the laziest code that works; stdlib → already-installed deps (polars, numpy, torch, matplotlib) first; no class/abstraction without a second use (the model dict protocol has 7+ uses; `CondHMM` is the only class); fewest files; no config files (constants at the top of the module that uses them). Every deliberate shortcut carries `# ponytail: <ceiling>, <upgrade trigger> (<FR/v2 ref>)` on one line; the marker must match the regex `# ?ponytail:\s*[^,]+,\s*\S+` so that `grep -rnE '(#|//) ?ponytail:' gmst tests` finds it (FR-6).
-- Seal (FR-28, DC10): `load_panel()` hides the test window (2021-09-01…09-14: all Y and X = NaN) unless `unseal=True`. Inside `gmst/` the literal `unseal=True` appears only in `gmst/run_all.py`, in the final stage, after `selection.json` is written. All design statistics (thresholds, τ, h, K, p*, bin edges, climatology) use only dates ≤ 2021-08-31. Development runs use `run_all --no-final`. Nobody opens or prints `results/test_metrics.csv`/`test_predictions.csv` values before Task 24's single final run; smoke runs write them into a temp dir that tests only schema-check. The sealed window is evaluated for exactly one B4-family candidate (the one selected on f1–f4), plus B0/B0′/B1 for comparison.
-- B1 is a benchmark only (user decision): the submitted model is always a Core B4-family candidate. The CI gate against B1 (ΔMAE and Δmean-Brier day-block-bootstrap 95 % upper bounds < 0 on the 54 OOF days) is the success criterion; when it fails, the pre-registered improvement loop ① B4-H → ② B4-IO → ③ B4-KAN runs (Tasks 21–23) until the gate is met or 2026-10-03, and every candidate (run or not) is reported with its count.
+- Seal (FR-28, DC10, review R1): load_panel hides every 09-01…09-14 Y and X unless unseal=True. No development test, smoke, or reproducibility command invokes real unseal. Default runner and --no-final stop after development stages. --smoke runs a pseudo-final with f4 train and 08-18…08-31 as its 14-day pseudo-test; it uses load_panel() with the September seal intact. --final is the sole explicit real-unseal path, allowed only after selection.json fixes model, variant, parameters, and p*. --smoke and --final are mutually exclusive. Task 24 invokes --final once; later rerun only to repair a documented execution defect, never to reselect a model.
+- B1 is a benchmark only: only B4 family is submitted. The MAE and mean-Brier CI gate uses the derived 53 usable OOF days and is an exploratory development gate after candidate selection, not a general superiority claim. The fixed B1 default has 100 rounds; no new deep encoder.
 - Masking is applied in three places at once: targets, lag/rolling inputs, HMM warm-up (DC1, DC2, DC14, [수정-5]). The loader does it once by writing NaN into `Y` (and `생산량` for suspect days); downstream code must treat NaN as "unknown" and never fill it.
-- Inner validation (ruling R10, FR-33/55/61/68): every fold's tuning (backbone (τ,h) pooled over f1–f4 inner windows, HMM early stopping, p*) uses the **inner window** = the last 7 calendar days of that fold's `train` role; after choosing, the fold model is **refit on the full train window** and only that refit predicts the fold's validation days. The fold's own validation days are never a selection criterion. Calibration stays leave-one-fold-out (FR-54).
+- Internal split (FR-33/54/55/61/68, review R2/R3): for each fold and variant, order its train-role days with ≥1 finite target. With n such days, reserve ≥5 for initial fit; cal_count=min(7,max(0,n−10)) newest days; tune_count=min(7,max(0,n−cal_count−5)) preceding days. features.internal_split(panel, fold, train_idx=None) returns (fit_idx,tune_idx,cal_idx): fit_idx contains all train dates before tune_idx (or cal_idx if tune empty), including dates without usable target; tune_idx and cal_idx contain usable days only. features.tuning_idx and features.inner_idx return indices 1 and 2 respectively. Tune hyperparameters/epochs on tune_idx using fit_idx, fit a calibration predictor on all train dates before cal_idx, predict cal_idx forward, then refit on the full train for outer validation. Empty tuning uses fixed defaults with a status/count; empty calibration uses identity probability calibration and p*=0.5 with a status/count. Never pool other folds into fold j settings. For final September inference, repeat selection on the final pre-September train and fit the final calibrator from same-(model,variant) f1–f4 pre-September OOF.
 - Device (FR-4): `gmst/hmm.py` defines `DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")`; one GPU at most. `uv run pytest -q` must pass on the GPU machine and with `CUDA_VISIBLE_DEVICES=""`. Tests that compare bitwise pass `device="cpu"`.
 - Determinism (FR-5): numpy `np.random.default_rng(seed)`, `torch.manual_seed(seed)`, seed 0 by default; MC draws use a per-date `torch.Generator` seeded with `int(date.strftime("%Y%m%d"))`.
 - Paths: `pathlib` only; the data folder name contains a space and Hangul. Raw CSV has a BOM and **must** be read with `pl.read_csv(path, infer_schema_length=None)` (default inference fails on `강수량` = `0.2`, verified).
@@ -39,14 +39,14 @@
 | `gmst/__init__.py` | `ROOT`, `DATA`, `RESULTS` only | 1 |
 | `gmst/preprocess.py` | raw hourly CSV → repaired 15-min CSV + `data_audit.json` | 2 |
 | `gmst/splits.py` | per-date policy table (copies, suspect, operating, holiday, fold roles) | 3 |
-| `gmst/features.py` | `load_panel` (masking, seal), protocols, calendar, B1 row builders | 4, 8 |
+| gmst/features.py; optional flat lgbm_features.py | panel loader, seal, protocols, calendar, B1 row builders; features.py retains public names | 4, 8 |
 | `gmst/evaluate.py` | metrics, thresholds, rolling-origin loop, calibration, p*, climatology, risk check, bootstrap, DM, selection | 5, 6, 9, 10 |
-| `gmst/baselines.py` | B0, B0′, lag-7 table, B1 LightGBM | 6, 8 |
+| gmst/baselines.py; optional flat hybrid.py | B0/B0′/B1 public facade and H hybrid centre; baselines.py retains public names | 6, 8, 21 |
 | `gmst/backbone.py` | cyclic-RW2 backbone, BB model, (τ,h) selection, as-of backbone | 7 |
-| `gmst/hmm.py` | conditional HMM, forward/backward, training, MC forecast, analytic risk, B2/B3/B4 factory, transition table, state stability | 11, 12, 14 |
+| gmst/hmm.py (public facade); optional flat hmm_core.py, training.py, forecast.py, states.py | conditional HMM numerical work and public API; split only if needed for clear ownership, no registry/framework | 11, 12, 14, 21–23 |
 | `gmst/scenario.py` | KEPCO 2021 tariff, ratchet, schedule transforms, SCENARIO what-ifs | 15, 16 |
 | `gmst/analysis.py` | error by condition, FN/FP tables, augmentation-leakage gap | 17 |
-| `gmst/run_all.py` | one-command runner, smoke, final unseal, submission files, requirements, package | 18, 19 |
+| gmst/run_all.py; optional flat run_development.py and run_outputs.py | public CLI and sole unseal call; helpers may orchestrate development/write outputs | 18, 19 |
 | `tests/test_style.py` | ponytail marker format, banned imports, unseal location, deps, ledger/README checks | 1, 22 |
 | `tests/test_preprocess.py`, `test_splits.py`, `test_features.py`, `test_evaluate.py`, `test_baselines.py`, `test_backbone.py`, `test_hmm.py`, `test_leakage.py`, `test_state_stability.py`, `test_scenario.py`, `test_analysis.py`, `test_run_all.py`, `test_results.py`, `test_notebooks.py` | tests per module / cross-cutting | 2–25 |
 | `notebooks/01_preprocess.ipynb`, `02_eda.ipynb` (modify), `03_results.ipynb` (create) | display-only viewers | 21 |
@@ -57,9 +57,11 @@
 
 ## Shared contracts (read before any task)
 
+**Implementation-review clarifications (2026-09-23):** Evaluation rows recompute path-model risk from the same observed-slot path maxima used for the event; point baselines likewise use observed-slot point maxima. Issued/submission risk remains the full-day prediction. B1 retains its separately trained daily classifier probability (its labels are observed-slot maxima); it has no joint path distribution from which to recompute a day-specific masked probability, and this limitation must be stated. H centre cross-fitting and the LOEO augmentation diagnostic mask held-out target values in every target-derived training feature, including lags and fitted backbone. The LOEO diagnostic also masks held-out historical targets for validation features; it is a strict event-isolation diagnostic, not the operational rolling-origin estimand. The unused legacy fit_with_inner helper is superseded by hmm_model's separate tuning/calibration/full-fit stages.
+
 **Panel dict** (returned by `features.load_panel`, consumed everywhere). Model code may read only these keys: `dates` (list of 257 `datetime.date`, 2021-01-01…2021-09-14), `Y` (257×96 float64, NaN = masked/missing/sealed), `X` (dict with keys `생산량`, `기온`, `풍속`, `습도`, `강수량_증분`, each 257×96 float64, hourly value repeated over its 4 slots, NaN when sealed; `생산량` NaN on suspect days), `is_missing` (257×96 bool, the outage flag), `days` (polars DataFrame = the 17-column day table, `date` as `pl.Date`), `op` (257 int8, true `is_operating`), `hol` (257 int8), `dtype` (257 int8: 0 `wk`, 1 `sat`, 2 `sun`), `dow` (257 int8, Monday = 0), `month` (257 int8).
 
-**Model dict protocol** (rolling-origin input): `{"name": str, "fit": fit(panel, fold, C) -> state, "predict": predict(state, panel, d) -> pred, "posthoc": optional posthoc(state, panel, d) -> (filt, smooth)}`. `fold` ∈ {`f1`,`f2`,`f3`,`f4`,`test`}; `C` = np.ndarray (3,) thresholds (C50, C75, C90) of that fold; `d` = int day index. A state may carry `"inner_state"` (a state accepted by the same `predict`) holding the model refit-free inner-window fit used for inner-day predictions (p*). `predict` must use only `Y[:d]`, `X[:d]`, calendar of `d`, and the protocol-allowed exogenous values of day `d` (FR-33).
+**Model dict protocol** (rolling-origin input): model dict has name, fit(panel,fold,C)->state, predict(state,panel,d)->prediction, and required inner_state(state)->state|None extractor. B0/B0p return the same no-fit state; BB/B1/HMM return their calibration fit state. Optional posthoc(state,panel,d) and evaluate_nll(state,panel,indices)->(value,n) callbacks are model-specific. The evaluator calls evaluate_nll only after predictions, never inside fit. The unchanged public APIs from commit 6619558 remain binding unless explicitly replaced in this plan. predict may use only Y[:d], X[:d], calendar(d), and protocol-allowed day-d exogenous inputs.
 
 **Prediction dict** (FR-34): `y_mean` (96,), `y_median` (96,), `q` (19×96 or `None`), `paths` (N×96 or `None`), `M_hat_median` (float), `M_hat_mean` (float), `peak_time_mode` (int 0–95), `risk_raw` (np.ndarray (3,) for C50/C75/C90). Extra keys are allowed (B1 adds `Mq`).
 
@@ -164,13 +166,9 @@ Expected: collection error `ModuleNotFoundError: No module named 'gmst'` (pytest
 Run: `uv run pytest tests/test_style.py -q` → `5 passed`.
 Run: `uv run python -c "import lightgbm, torch, polars, gmst; print(torch.__version__, lightgbm.__version__)"` → prints `2.14.0+cu126 <lightgbm version>`.
 
-- [ ] **Step 5: Full suite and commit**
+- [ ] **Step 5: Full suite and verify**
 
 Run: `uv run pytest -q` → all passed.
-```bash
-git add pyproject.toml uv.lock gmst/__init__.py tests/test_style.py
-git commit -m "feat: gmst package skeleton, lightgbm + dev pytest, style gate"
-```
 
 ---
 
@@ -304,11 +302,7 @@ def test_run_writes_and_keeps_raw(tmp_path):
 - [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_preprocess.py -q` → `ModuleNotFoundError: No module named 'gmst.preprocess'`.
 - [ ] **Step 3: Implement** `gmst/preprocess.py` to the contract and algorithm above.
 - [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_preprocess.py -q` → `8 passed`. Then `uv run python -m gmst.preprocess` (exit 0; rewrites `DATA/okm_15min_2021.csv` and `results/data_audit.json`).
-- [ ] **Step 5: Full suite and commit** — `uv run pytest -q`, then
-```bash
-git add gmst/preprocess.py tests/test_preprocess.py "5. 자원 최적화 AI 데이터셋/okm_15min_2021.csv"
-git commit -m "feat: preprocessing script replaces notebook 15-min output (zeros masked, wind interp, precip increment, leakage audit)"
-```
+- [ ] **Step 5: Full suite and verify** — `uv run pytest -q`, then
 (`results/` is not committed until Task 24.)
 
 ---
@@ -481,168 +475,19 @@ def test_run_writes_csv():
 - [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_splits.py -q` → `ModuleNotFoundError: No module named 'gmst.splits'`.
 - [ ] **Step 3: Implement** `gmst/splits.py` to the contract and algorithm above.
 - [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_splits.py -q` → `14 passed`; `uv run python -m gmst.splits` exits 0.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/splits.py tests/test_splits.py "5. 자원 최적화 AI 데이터셋/okm_cv_splits_2021.csv"
-git commit -m "feat: per-date policy table with copy/edited-copy rule, suspect, operating, holidays, fold roles"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
-### Task 4: Loader — masking, protocols, seal
+### Task 4: Loader, masking, protocols, seal and internal split
 
-**Files:**
-- Create: `gmst/features.py`, `tests/test_features.py`
+Files: gmst/features.py and tests/test_features.py.
 
-**Interfaces:**
-- Consumes: `preprocess.OUT`, `splits.OUT` (both CSVs must exist: run `uv run python -m gmst.preprocess && uv run python -m gmst.splits` once if missing).
-- Produces (module `gmst.features`):
-  - `PROTOCOLS = {"A": set(), "A+": {"op", "hol"}, "A+W*": {"op", "hol", "wx_obs"}, "B": {"op", "hol", "prod"}}` (FR-29; no `A+W`).
-  - `WX = ("기온", "풍속", "습도", "강수량_증분")`, `XCOLS = ("생산량",) + WX`
-  - `season(month: int) -> int` — 0 winter (11–2), 1 spring/fall (3–5, 9–10), 2 summer (6–8) (FR-30).
-  - `load_panel(include_copies=False, include_suspect=False, unseal=False) -> dict` — the panel dict of "Shared contracts".
-  - `usable_peak(panel) -> np.ndarray` (257 bool) — `days.n_missing ≤ 4` and `Y[d]` has ≥ 1 finite value (FR-38).
-  - `role_idx(panel, fold: str, role: str) -> np.ndarray` (int, ascending) — days whose `fold` column equals `role`.
-  - `inner_idx(panel, fold: str) -> np.ndarray` (int, ascending) — `train`-role days whose date ≥ (last `train` date − 6 days) (ruling R10). f1 → 06-29…07-05, f2 → 07-13…07-19, f3 → 07-27…08-02, f4 → 08-10…08-16, test → 08-24…08-30.
-  - `cal_flags(panel, protocol: str) -> tuple[np.ndarray, np.ndarray]` — `(op_eff, hol_eff)` int8: protocol `A` → all ones / all zeros; otherwise `(panel["op"], panel["hol"])` (FR-29).
+Implement load_panel(include_copies=False, include_suspect=False, unseal=False), role_idx, cal_flags, internal_split(panel, fold, train_idx=None), tuning_idx and inner_idx. The loader masks copy/suspect/outage targets and lag inputs once. It hides all September Y and X by default. Only the explicit Task 24 --final branch passes unseal=True in production.
 
-**Algorithm (FR-27, FR-28, DC1, DC2, DC7, DC10, DC14):**
-1. Read the 15-min CSV (`infer_schema_length=None`), sort by datetime, reshape each column to 257×96. Read the day table CSV, parse `date` with `%Y.%m.%d`.
-2. `Y` = `전력` (NaN at missing points). Set `Y[d] = NaN` for days with `is_copy` (both kinds) unless `include_copies`; set `Y[d] = NaN` and `X["생산량"][d] = NaN` for `is_suspect` days unless `include_suspect`. Covariates of copy days are kept.
-3. Unless `unseal`: for days whose `test` column == `"test"`, set `Y` and every `X` array to NaN.
-4. `op`, `hol` from `is_operating`, `is_holiday`; `dtype` from `daytype` (wk 0, sat 1, sun 2); `dow` = `date.weekday()`; `month` = `date.month`.
-5. `전기요금(계절)` is never loaded into the panel (DC7).
+Internal split follows the global contract above. The optional train_idx restricts a variant such as SCENARIO B before the split; n counts dates with at least one finite target. Return three ascending int arrays. On n<5 return all available train dates as fit and empty tune/cal arrays; mark downstream defaults. No split member may be after that fold's train end.
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_features.py`:
-
-```python
-from datetime import date, timedelta
-
-import numpy as np
-import polars as pl
-import pytest
-
-from gmst import features as ft
-from gmst import preprocess as pp
-
-
-@pytest.fixture(scope="module")
-def panel():
-    return ft.load_panel()
-
-
-def di(p, d):
-    return p["dates"].index(d)
-
-
-def upto(p, d):
-    return np.array([x <= d for x in p["dates"]])
-
-
-def test_shapes(panel):
-    assert len(panel["dates"]) == 257 and panel["dates"][0] == date(2021, 1, 1)
-    assert panel["Y"].shape == (257, 96) and panel["Y"].dtype == np.float64
-    assert set(panel["X"]) == {"생산량", "기온", "풍속", "습도", "강수량_증분"}
-    assert all(v.shape == (257, 96) and v.dtype == np.float64 for v in panel["X"].values())
-    assert panel["is_missing"].dtype == bool and int(panel["is_missing"].sum()) == 74
-    assert panel["days"].height == 257 and panel["days"]["date"].dtype == pl.Date
-    for k in ("op", "hol", "dtype", "dow", "month"):
-        assert panel[k].shape == (257,)
-    assert int(panel["op"].sum()) == 195 and int(panel["hol"].sum()) == 8
-    assert np.bincount(panel["dtype"]).tolist() == [183, 37, 37]
-
-
-def test_counts(panel):
-    Y = panel["Y"]
-    assert np.isfinite(Y).sum() == 11352
-    assert np.isfinite(Y[upto(panel, date(2021, 7, 5))]).sum() == 6240
-    m = upto(panel, date(2021, 8, 30))
-    assert np.isfinite(Y[m]).sum() == 11256
-    has = np.isfinite(Y[m]).any(1)
-    assert has.sum() == 118 and (has & (panel["op"][m] == 1)).sum() == 93
-
-
-@pytest.mark.parametrize("kw,n", [({"include_copies": True}, 23064), ({"include_suspect": True}, 11544),
-                                  ({"include_copies": True, "include_suspect": True}, 23256)])
-def test_ablation_counts(kw, n):
-    assert np.isfinite(ft.load_panel(**kw)["Y"]).sum() == n
-
-
-def test_sealed(panel):
-    t = ft.role_idx(panel, "test", "test")
-    assert len(t) == 14 and panel["dates"][t[0]] == date(2021, 9, 1)
-    assert np.isnan(panel["Y"][t]).all()
-    assert all(np.isnan(v[t]).all() for v in panel["X"].values())
-    assert np.isfinite(ft.load_panel(unseal=True)["X"]["기온"][t]).all()
-
-
-def test_copy_mask(panel):
-    i = di(panel, date(2021, 3, 1))
-    assert np.isnan(panel["Y"][i]).all()
-    assert np.isfinite(panel["X"]["생산량"][i]).all() and np.isfinite(panel["X"]["기온"][i]).all()
-    assert np.isfinite(ft.load_panel(include_copies=True)["Y"][i]).all()
-
-
-def test_edited_mask(panel):
-    for d in (date(2021, 1, 1), date(2021, 1, 9), date(2021, 1, 10), date(2021, 1, 16),
-              date(2021, 3, 7), date(2021, 3, 21), date(2021, 3, 28)):
-        assert np.isnan(panel["Y"][di(panel, d)]).all()
-
-
-def test_suspect_mask(panel):
-    for d in (date(2021, 7, 13), date(2021, 7, 15)):
-        i = di(panel, d)
-        assert np.isnan(panel["Y"][i]).all() and np.isnan(panel["X"]["생산량"][i]).all()
-        assert np.isfinite(panel["X"]["기온"][i]).all()
-    s = ft.load_panel(include_suspect=True)
-    assert np.isfinite(s["Y"][di(s, date(2021, 7, 13))]).all()
-
-
-def test_missing_points(panel):
-    assert np.isnan(panel["Y"][panel["is_missing"]]).all()
-
-
-def test_season_indicator():
-    df = pl.read_csv(pp.OUT, infer_schema_length=None).with_columns(
-        pl.col("datetime").str.slice(5, 2).cast(pl.Int32).alias("month"))
-    per = df.group_by("month").agg(pl.col("전기요금(계절)").n_unique().alias("n"),
-                                   pl.col("전기요금(계절)").first().alias("v"))
-    assert per["n"].unique().to_list() == [1]
-    pairs = {(ft.season(m), v) for m, v in per.select("month", "v").iter_rows()}
-    assert len({s for s, _ in pairs}) == len({v for _, v in pairs}) == len(pairs)
-    assert [ft.season(m) for m in (1, 3, 6, 9, 10, 11, 12)] == [0, 1, 2, 1, 1, 0, 0]
-
-
-def test_protocols(panel):
-    assert ft.PROTOCOLS == {"A": set(), "A+": {"op", "hol"}, "A+W*": {"op", "hol", "wx_obs"},
-                            "B": {"op", "hol", "prod"}}
-    op, hol = ft.cal_flags(panel, "A")
-    assert (op == 1).all() and (hol == 0).all()
-    op, hol = ft.cal_flags(panel, "A+")
-    assert np.array_equal(op, panel["op"]) and np.array_equal(hol, panel["hol"])
-
-
-def test_usable_peak(panel):
-    u = ft.usable_peak(panel)
-    assert [int(u[ft.role_idx(panel, f, "val")].sum()) for f in ("f1", "f2", "f3", "f4")] == [12, 13, 14, 12]
-
-
-def test_role_and_inner_idx(panel):
-    assert len(ft.role_idx(panel, "f1", "train")) == 186
-    assert [panel["dates"][i] for i in ft.inner_idx(panel, "f1")] == [date(2021, 6, 29) + timedelta(days=k) for k in range(7)]
-    assert [panel["dates"][i] for i in ft.inner_idx(panel, "f2")] == [date(2021, 7, d) for d in range(13, 20)]
-    assert [panel["dates"][i] for i in ft.inner_idx(panel, "test")][-1] == date(2021, 8, 30)
-    assert len(ft.inner_idx(panel, "f4")) == 7
-```
-
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_features.py -q` → `ModuleNotFoundError: No module named 'gmst.features'`.
-- [ ] **Step 3: Implement** `gmst/features.py` (loader part only; Task 8 appends the B1 row builders).
-- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_features.py -q` → `14 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/features.py tests/test_features.py
-git commit -m "feat: panel loader with copy/suspect/outage masking, protocols, seal, inner windows"
-```
+Acceptance: verify known pre-September finite counts 11,352 total, 11,256 through Aug 30, default sealed September arrays all NaN, and protocol permissions. Test unseal behavior only on a synthetic temporary panel/CSV fixture; never call real load_panel(unseal=True) in pytest. Verify f1 and July-only scenario split keep at least five fit days and that no tune/cal day is in its fit. Full pytest runs with the real seal intact.
 
 ---
 
@@ -767,297 +612,29 @@ def test_event_counts(panel):
 - [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_evaluate.py -q` → `ModuleNotFoundError: No module named 'gmst.evaluate'`.
 - [ ] **Step 3: Implement** the Task 5 functions in `gmst/evaluate.py` (numpy only).
 - [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_evaluate.py -q` → `15 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/evaluate.py tests/test_evaluate.py
-git commit -m "feat: metric functions (MAE/RMSE/CRPS/coverage/Brier/AUC/F1, same-slot peaks) and fold thresholds"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
-### Task 6: Naive baselines, rolling-origin loop, OOF tables, point metrics
+### Task 6: Naive baselines, rolling-origin loop and inner predictions
 
-**Files:**
-- Create: `gmst/baselines.py`, `tests/test_baselines.py`
-- Modify: `gmst/evaluate.py` (append)
+Files: gmst/baselines.py, gmst/evaluate.py, tests/test_baselines.py, tests/test_evaluate.py.
 
-**Interfaces:**
-- Consumes: Task 4 panel helpers, Task 5 metrics.
-- Produces:
-  - `evaluate.point_pred(y: np.ndarray, C: np.ndarray) -> dict` — FR-48 prediction dict for point baselines: `y_mean = y_median = y`, `q = None`, `paths = None`, `M_hat_median = M_hat_mean = nanmax(y)`, `peak_time_mode = int(nanargmax(y))`, `risk_raw = (M_hat_median > C).astype(float)`.
-  - `evaluate.SLOT_COLS = ["fold", "variant", "model", "date", "datetime", "y_true", "is_missing", "y_mean", "y_median", *QCOLS, "state_filt", "state_smooth"]`
-  - `evaluate.DAY_COLS = ["fold", "variant", "model", "date", "usable_peak", "n_obs", "M_true", "M_hat_median", "M_hat_mean", "peak_slot_true", "peak_time_mode", "C50", "C75", "C90", "risk_raw_C50", "risk_raw_C75", "risk_raw_C90", "risk_platt_C50", "risk_platt_C75", "risk_platt_C90", "risk_iso_C50", "risk_iso_C75", "risk_iso_C90", "event_C50", "event_C75", "event_C90"]` (FR-43)
-  - `evaluate.rolling_origin(model, panel, folds=FOLDS_CV, variant="main", states=None) -> tuple[pl.DataFrame, pl.DataFrame, dict, pl.DataFrame]` = `(slots, days, states, inner_days)`
-  - `evaluate.point_metrics(slots, days, panel) -> pl.DataFrame` with columns `["model", "variant", "fold", "stratum", "metric", "value", "n"]` (FR-44)
-  - `baselines.b0p_ref(panel, d, limit=28) -> tuple[int | None, bool]` — (reference day index, fallback_used)
-  - `baselines.b0p_model(limit=28) -> dict` (name `B0p`), `baselines.b0_model() -> dict` (name `B0`)
-  - `baselines.lag7_skip_table(panel) -> pl.DataFrame` columns `fold, mae, n` (rows f1…f4)
+Keep model dictionaries with name, fit, predict, optional posthoc. rolling_origin(model,panel,folds=FOLDS_CV,variant="main",states=None) returns (slots,days,states,inner_days). Each model fit uses only its fold train. The full state predicts ordered outer days; model["inner_state"](state) predicts every cal_idx day without training on those days. B0 and B0p also provide the required inner_state extractor (same no-fit state), BB provides a profile fit before cal_idx. inner_days must contain actual predictions for every (model,variant,fold), including the point baselines and newly added candidates.
 
-**Algorithm:**
-- `b0p_ref` (FR-45, ruling R4): candidates `j < d` with `np.isfinite(Y[j]).all()` (this covers loader-masked days, sealed days and `n_missing > 0`); first pass `j` from `d−1` down to `max(d−limit, 0)` with `op[j] == op[d]` and `dtype[j] == dtype[d]` → `(j, False)`; `limit=None` means no window. Otherwise second pass from `d−1` down to 0 with `op[j] == op[d]` only → `(j, True)`; none → `(None, True)`. Never a future day, never a negative index.
-- `b0p_model`: `fit(panel, fold, C) -> {"C": C}`; `predict` → `point_pred(Y[ref], C)` (if `ref is None`, all-NaN y).
-- `b0_model` (FR-46): `y = Y[d−7]` (all-NaN if `d < 7`), NaN slots replaced by the B0′ values for day `d`; → `point_pred`.
-- `lag7_skip_table` (FR-47): per fold, over val days, points where `Y[d]` and `Y[d−7]` are both finite; MAE and n.
-- `rolling_origin` (FR-43): for each fold `f`: `tr = role_idx(panel, f, "train")`; `C, _ = thresholds(panel, tr)`; `state = states[f] if states else model["fit"](panel, f, C)`; validation days = `role_idx(panel, f, "test" if f == "test" else "val")` in date order; `pred = model["predict"](state, panel, d)`; parameters fixed within the fold, history grows by using the panel as-is.
-  - Slot rows (96 per day): `date` `%Y.%m.%d`, `datetime` `%Y.%m.%d %H:%M:%S`, `y_true = Y[d, q]` (NaN when masked), `is_missing = panel["is_missing"][d, q]`, `y_mean`, `y_median`, `q05…q95` (NaN when `q is None`), `state_filt`/`state_smooth` (Int64, null unless `"posthoc"` in model; then `model["posthoc"](state, panel, d)` returns two int arrays of 1-based states).
-  - Day row: `obs = isfinite(Y[d])`; `usable_peak = usable_peak(panel)[d]`; `n_obs = obs.sum()`; `M_true = obs_max(Y[d], obs)`; `peak_slot_true = nanargmax(Y[d])` (Int64, null if no obs); evaluation `M_hat_*` (FR-38): if `pred["paths"]` is not None → `median`/`mean` of `obs_max(paths, obs)` when `n_obs > 0` else of the 96-slot path maxima; elif `pred["q"] is None` (point baseline) → `obs_max(y_median, obs)` for both (or `nanmax` if no obs); else (B1) the predicted `M_hat_median`/`M_hat_mean` unchanged. `risk_raw_*` = `pred["risk_raw"]` as issued (not recomputed on observed slots — **[plan pin]**, matters only for 09-08); `risk_platt_*`, `risk_iso_*` = NaN (filled in Task 9); `event_Cj = float(M_true > C_j)` if `usable_peak` else NaN; `C50/C75/C90` = fold thresholds.
-  - Inner rows: if `"inner_state" in state`, the same day rows (no slot rows) for `inner_idx(panel, f)` predicted with `model["predict"](state["inner_state"], panel, d)`; else none. `inner_days` has `DAY_COLS`.
-  - Returns `slots` (SLOT_COLS), `days` (DAY_COLS), `states` ({fold: state}), `inner_days` (DAY_COLS, possibly empty).
-- `point_metrics`: for each (model, variant, fold) present plus `pooled` (all rows with fold in `FOLDS_CV`, emitted when at least one CV fold is present) and each stratum `all` / `op` / `nonop` (true `panel["op"]` of the row's date): slot metrics `mae` (y_median), `rmse` (y_mean), `crps`, `cov50` (q25,q75), `cov80` (q10,q90), `cov90` (q05,q95) with n = points used (NaN value, n 0 when q is absent); day metrics over `usable_peak` rows: `peak_mae`, `peak_hit2`, `brier_raw_C50/75/90`, `brier_mean_raw` (mean of the three), `auc_C50/75/90` (on `risk_raw`), `n_events_C50/75/90` (value = event count, n = usable days). `value` Float64, `n` Int64.
+Use one shared day-row builder for outer and inner so risk_raw, event thresholds, and usable_peak agree. Preserve slot/day CSV schemas from the PRD. If cal_idx is empty, return a typed empty inner frame and create a later explicit fallback p* key; never silently omit the key.
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_baselines.py`:
-
-```python
-from datetime import date
-
-import numpy as np
-import polars as pl
-import pytest
-
-from gmst import baselines as bl
-from gmst import evaluate as ev
-from gmst import features as ft
-
-FOLDS = ("f1", "f2", "f3", "f4")
-
-
-@pytest.fixture(scope="module")
-def panel():
-    return ft.load_panel()
-
-
-@pytest.fixture(scope="module")
-def b0p(panel):
-    return ev.rolling_origin(bl.b0p_model(), panel)
-
-
-def fold_mae(slots, fold):
-    s = slots.filter(pl.col("fold") == fold)
-    return ev.mae(s["y_true"].to_numpy(), s["y_median"].to_numpy())
-
-
-def test_lag7_skip_table(panel):
-    t = bl.lag7_skip_table(panel)
-    assert t["fold"].to_list() == list(FOLDS)
-    assert [round(v, 2) for v in t["mae"].to_list()] == [6.23, 25.77, 65.34, 9.84]
-    assert t["n"].to_list() == [960, 1152, 1248, 1272]
-
-
-def test_b0p_oof(b0p):
-    slots = b0p[0]
-    got = [fold_mae(slots, f) for f in FOLDS]
-    assert [round(m, 2) for m, _ in got] == [14.85, 10.38, 14.49, 15.17]
-    assert [n for _, n in got] == [1152, 1248, 1344, 1272]
-
-
-def test_b0p_fallback_only_two_days(panel):
-    fb = {}
-    for f in FOLDS:
-        for d in ft.role_idx(panel, f, "val"):
-            ref, used = bl.b0p_ref(panel, int(d))
-            assert ref < d and np.isfinite(panel["Y"][ref]).all()
-            assert panel["days"]["n_missing"][ref] == 0
-            if used:
-                fb[panel["dates"][d]] = panel["dates"][ref]
-    assert fb == {date(2021, 7, 31): date(2021, 7, 25), date(2021, 8, 2): date(2021, 8, 1)}
-
-
-def test_b0p_no_limit_sensitivity(panel):
-    slots = ev.rolling_origin(bl.b0p_model(limit=None), panel, folds=("f2",))[0]
-    assert round(fold_mae(slots, "f2")[0], 2) == 12.06
-    ref, _ = bl.b0p_ref(panel, panel["dates"].index(date(2021, 7, 31)), limit=None)
-    assert panel["dates"][ref] == date(2021, 1, 2)
-
-
-def test_b0_predicts_every_slot(panel):
-    slots = ev.rolling_origin(bl.b0_model(), panel)[0]
-    assert slots.height == 5376 and np.isfinite(slots["y_median"].to_numpy()).all()
-
-
-def test_oof_schema(b0p):
-    slots, days, states, inner = b0p
-    assert slots.columns == ev.SLOT_COLS and days.columns == ev.DAY_COLS and inner.columns == ev.DAY_COLS
-    assert slots.height == 5376 and days.height == 56 and inner.height == 0
-    assert set(slots["model"].unique()) == {"B0p"} and set(days["variant"].unique()) == {"main"}
-    assert days.filter(pl.col("usable_peak")).height == 51
-    assert set(states) == set(FOLDS)
-    d0 = days.filter(pl.col("fold") == "f1").row(0, named=True)
-    assert d0["date"] == "2021.07.07" and (d0["C50"], d0["C75"], d0["C90"]) == pytest.approx((181.0, 189.5, 198.0))
-    assert slots["datetime"][0] == "2021.07.07 00:00:00"
-    risk = days.select("risk_raw_C50", "risk_raw_C75", "risk_raw_C90").to_numpy()
-    assert set(np.unique(risk)) <= {0.0, 1.0}
-
-
-def test_point_metrics(b0p, panel):
-    slots, days, _, _ = b0p
-    m = ev.point_metrics(slots, days, panel)
-    assert m.columns == ["model", "variant", "fold", "stratum", "metric", "value", "n"]
-    r = m.filter((pl.col("fold") == "f1") & (pl.col("stratum") == "all") & (pl.col("metric") == "mae")).row(0, named=True)
-    assert round(r["value"], 2) == 14.85 and r["n"] == 1152
-    assert set(m["fold"].unique()) == {"f1", "f2", "f3", "f4", "pooled"}
-    assert set(m["stratum"].unique()) == {"all", "op", "nonop"}
-    ne = m.filter((pl.col("stratum") == "all") & (pl.col("metric") == "n_events_C90"))
-    assert dict(ne.select("fold", "value").iter_rows()) == {"f1": 4, "f2": 7, "f3": 2, "f4": 0, "pooled": 13}
-    assert np.isnan(m.filter(pl.col("metric") == "crps")["value"].to_numpy()).all()
-    auc4 = m.filter((pl.col("fold") == "f4") & (pl.col("stratum") == "all") & (pl.col("metric") == "auc_C90"))
-    assert np.isnan(auc4["value"][0])
-```
-
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_baselines.py -q` → `ModuleNotFoundError: No module named 'gmst.baselines'`.
-- [ ] **Step 3: Implement** `gmst/baselines.py` (B0, B0′, lag-7 table) and append `point_pred`, `SLOT_COLS`, `DAY_COLS`, `rolling_origin`, `point_metrics` to `gmst/evaluate.py`.
-- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_baselines.py -q` → `7 passed`. These reproduce v2 §4.3 / 부록 B (G3).
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/baselines.py gmst/evaluate.py tests/test_baselines.py
-git commit -m "feat: B0/B0' baselines, rolling-origin OOF loop with inner-day rows, point metrics (reproduces v2 §4.3)"
-```
+Acceptance: synthetic fold with labels changed only in its outer period leaves fit state and its first 00:00 prediction invariant; changing later outer observations may change subsequent predictions. Verify B0/B0p/BB have inner rows and no outer target is used in fitting. Preserve the existing B0p 28-day and B0 lag-7 behavior.
 
 ---
 
-### Task 7: Penalized cyclic-RW2 backbone, BB model, (τ, h) selection on inner windows
+### Task 7: Cyclic RW2 backbone and fold-specific (τ,h)
 
-**Files:**
-- Create: `gmst/backbone.py`, `tests/test_backbone.py`
+Files: gmst/backbone.py and tests/test_backbone.py.
 
-**Interfaces:**
-- Consumes: panel helpers (`role_idx`, `inner_idx`, `cal_flags`), `evaluate.point_pred`, `evaluate.rolling_origin`, `evaluate.FOLDS_CV`.
-- Produces (module `gmst.backbone`):
-  - `C2: np.ndarray` (96×96) — row q has `+1` at `(q−1) mod 96`, `−2` at `q`, `+1` at `(q+1) mod 96`.
-  - `TAU_GRID = (0.1, 1.0, 10.0, 100.0, 1000.0)`, `H_GRID = (30, 60, 120)`
-  - `fit_backbone(Y, op, daytype, train_idx, tau, half_life=60, min_days=5) -> tuple[np.ndarray, list[tuple[int, int]]]` — profiles (2, 3, 96) indexed `[op, dtype]`, and the sorted list of fallback classes.
-  - `predict_backbone(profiles, op, daytype) -> np.ndarray` — `profiles[op, daytype]` → (n, 96).
-  - `backbone_asof(Y, op, daytype, d, tau, half_life, min_days=5) -> np.ndarray` (96,)
-  - `asof_matrix(panel, day_idx, tau, half_life, protocol="A+") -> np.ndarray` (257, 96), rows `day_idx` filled, others NaN.
-  - `fold_backbone(panel, train_idx, tau, half_life, protocol="A+") -> np.ndarray` (257, 96) — m for every day from one fit on `train_idx`.
-  - `bb_model(tau, half_life, protocol="A+") -> dict` (name `BB`)
-  - `select_tau(panel, folds=FOLDS_CV) -> tuple[float, int, pl.DataFrame]` — `(tau, h, table)` with table columns `tau, half_life, mae_pooled` (15 rows, grid order).
+Retain fit_backbone, predict_backbone, asof_matrix, fold_backbone and bb_model. select_tau(panel,fold,train_idx=None) returns (tau,half_life,table) for exactly that fold; table has fold,tau,half_life,mae_tune,n_tune,status for the 15 grid pairs. Tune on tuning_idx using only fit_idx. If n_tune=0, choose the predeclared (10.0,60) with status=default_empty. Fit the issued fold model on all train dates after choice. For the real test fold, choose anew from pre-September training dates; never reuse a pooled f1–f4 winner. B1 as-of features and all dependent models receive the fold's chosen pair.
 
-**Algorithm (v2 §6, FR-58…FR-62, A5, A6, A23, A32, ruling R10):**
-- `fit_backbone`: weights `w_d = 2 ** (−(last − d) / half_life)` with `last = max(train_idx)` (`half_life=None` → 1). Usable class days = train days with ≥ 1 finite Y. For op `o` the parent system pools all its dtypes: `W_p[q] = Σ_d w_d·1[finite]`, `b_p[q] = Σ_d w_d·Y[d,q]` (NaN → 0), parent profile = `np.linalg.solve(np.diag(W_p) + tau * C2.T @ C2, b_p)` (NaN profile if the parent has no data). Each class `(o, t)` with fewer than `min_days` usable days gets the parent profile and is appended to the fallback list; otherwise it is solved with its own `W_c, b_c`. No sum-to-zero constraint, no trend term, no posterior sd (FR-59, FR-62).
-- `backbone_asof(Y, op, daytype, d, …)` is defined as `fit_backbone(Y, op, daytype, np.arange(d − 1), …)[0][op[d], daytype[d]]` (data through `d−2`, A32) and all-NaN for `d < 2`. It must call `fit_backbone` exactly this way so the test can compare bitwise.
-- `asof_matrix` uses `op_eff, _ = cal_flags(panel, protocol)` and `panel["dtype"]`; `fold_backbone` likewise.
-- `bb_model`: `fit(panel, fold, C) -> {"m": fold_backbone(panel, role_idx(panel, fold, "train"), tau, h, protocol), "C": C}`; `predict → point_pred(state["m"][d], C)` (FR-51).
-- `select_tau` (FR-61 with R10): for every `(tau, h)` in grid order, for every fold in `folds`: `tr = role_idx(panel, f, "train")`, `inn = inner_idx(panel, f)`, fit on `setdiff(tr, inn)` (true op flags), predict the inner days, accumulate absolute errors and counts over finite `Y`; `mae_pooled = Σ|err| / Σn`. Choose the minimum (ties → first in grid order). If the choice is on a grid edge (`tau ∈ {0.1, 1000}` or `h ∈ {30, 120}`) print `backbone grid edge: tau=<tau> h=<h>`. The same `(tau, h)` is used for every fold refit, the test fit and the B1 as-of feature (**[plan pin]**: one global pair).
-
-- [ ] **Step 1: Write the failing test** — create `tests/test_backbone.py`:
-
-```python
-from datetime import date
-
-import numpy as np
-import polars as pl
-import pytest
-
-from gmst import backbone as bb
-from gmst import evaluate as ev
-from gmst import features as ft
-
-
-@pytest.fixture(scope="module")
-def panel():
-    return ft.load_panel()
-
-
-def window(p, a, b):
-    return np.array([i for i, d in enumerate(p["dates"]) if a <= d <= b])
-
-
-def cell_stats(p, idx):
-    prof, _ = bb.fit_backbone(p["Y"], p["op"], p["dtype"], idx, tau=0.0, half_life=None, min_days=1)
-    m = bb.predict_backbone(prof, p["op"][idx], p["dtype"][idx])
-    y = p["Y"][idx]
-    r = y - m
-    f = np.isfinite(y)
-    r2 = 1 - np.sum(r[f] ** 2) / np.sum((y[f] - y[f].mean()) ** 2)
-    opm = np.repeat(p["op"][idx][:, None], 96, 1) == 1
-    sd1, sd0 = np.std(r[f & opm], ddof=1), np.std(r[f & ~opm], ddof=1)
-    flat = r.reshape(-1)
-    c = flat[np.isfinite(flat)]
-    lag1 = np.corrcoef(c[1:], c[:-1])[0, 1]   # [plan pin] drop NaNs, pair consecutive observed residuals
-    return r2, int(f.sum()), sd1, sd0, lag1, r
-
-
-def test_c2():
-    assert bb.C2.shape == (96, 96)
-    assert np.allclose(bb.C2 @ np.ones(96), 0)
-    r = bb.C2 @ np.arange(96.0)
-    assert r[0] == 96 and r[95] == -96 and np.allclose(r[1:95], 0)
-
-
-def test_cell_mean_julaug(panel):
-    r2, n, sd1, sd0, lag1, _ = cell_stats(panel, window(panel, date(2021, 7, 1), date(2021, 8, 31)))
-    assert n == 5592 and r2 == pytest.approx(0.923, abs=5e-4)
-    assert sd1 == pytest.approx(19.95, abs=0.02) and sd0 == pytest.approx(1.55, abs=0.02)
-    assert lag1 == pytest.approx(0.909, abs=0.002)
-
-
-def test_cell_mean_le0831(panel):
-    idx = window(panel, date(2021, 1, 1), date(2021, 8, 31))
-    _, _, sd1, sd0, lag1, r = cell_stats(panel, idx)
-    assert sd1 == pytest.approx(32.36, abs=0.02) and sd0 == pytest.approx(7.31, abs=0.02)
-    assert lag1 == pytest.approx(0.961, abs=0.002)
-    keep = np.array([panel["dates"][i] != date(2021, 1, 2) and panel["op"][i] == 0 for i in idx])
-    rr = r[keep]
-    assert np.std(rr[np.isfinite(rr)], ddof=1) == pytest.approx(4.47, abs=0.02)   # 01-02 residuals dropped, means kept
-
-
-def test_large_tau_constant(panel):
-    prof, _ = bb.fit_backbone(panel["Y"], panel["op"], panel["dtype"], ft.role_idx(panel, "f4", "train"), tau=1e8)
-    assert all(np.std(prof[o, t]) < 1e-3 for o in (0, 1) for t in (0, 1, 2))
-
-
-def test_fallback_f1(panel):
-    _, fb = bb.fit_backbone(panel["Y"], panel["op"], panel["dtype"], ft.role_idx(panel, "f1", "train"), tau=10.0)
-    assert (1, 2) in fb and (0, 1) in fb
-
-
-def test_invariance_to_validation_window(panel):
-    tr = ft.role_idx(panel, "f2", "train")
-    a, _ = bb.fit_backbone(panel["Y"], panel["op"], panel["dtype"], tr, tau=10.0, half_life=60)
-    Y2 = panel["Y"].copy()
-    Y2[ft.role_idx(panel, "f2", "val")] = 999.0
-    b, _ = bb.fit_backbone(Y2, panel["op"], panel["dtype"], tr, tau=10.0, half_life=60)
-    assert np.array_equal(a, b)
-
-
-def test_backbone_asof_uses_d_minus_2(panel):
-    d = panel["dates"].index(date(2021, 7, 21))
-    got = bb.backbone_asof(panel["Y"], panel["op"], panel["dtype"], d, tau=10.0, half_life=60)
-    prof, _ = bb.fit_backbone(panel["Y"], panel["op"], panel["dtype"], np.arange(d - 1), tau=10.0, half_life=60)
-    assert np.array_equal(got, prof[panel["op"][d], panel["dtype"][d]])
-    Y2 = panel["Y"].copy()
-    Y2[d - 1:] = 999.0
-    assert np.array_equal(got, bb.backbone_asof(Y2, panel["op"], panel["dtype"], d, tau=10.0, half_life=60))
-
-
-def test_select_tau(panel):
-    tau, h, table = bb.select_tau(panel)
-    assert table.columns == ["tau", "half_life", "mae_pooled"] and table.height == 15
-    best = table.sort("mae_pooled").row(0, named=True)
-    assert (tau, h) == (best["tau"], best["half_life"])
-    assert sorted(table["tau"].unique().to_list()) == [0.1, 1.0, 10.0, 100.0, 1000.0]
-
-
-def test_select_tau_never_reads_f4_validation(panel):
-    p2 = {**panel, "Y": panel["Y"].copy()}
-    p2["Y"][ft.role_idx(panel, "f4", "val")] = 999.0
-    assert bb.select_tau(panel)[2].equals(bb.select_tau(p2)[2])
-
-
-def test_bb_model_oof(panel):
-    slots = ev.rolling_origin(bb.bb_model(10.0, 60), panel, folds=("f4",))[0]
-    assert slots.height == 1344 and np.isfinite(slots["y_median"].to_numpy()).all()
-    assert np.array_equal(slots["y_mean"].to_numpy(), slots["y_median"].to_numpy())
-```
-
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_backbone.py -q` → `ModuleNotFoundError: No module named 'gmst.backbone'`.
-- [ ] **Step 3: Implement** `gmst/backbone.py`.
-- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_backbone.py -q` → `10 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/backbone.py tests/test_backbone.py
-git commit -m "feat: closed-form cyclic RW2 backbone, BB model, inner-window (tau, h) selection, as-of backbone"
-```
+Acceptance: perturb any outer validation labels and assert that fold's selected pair, fit state and first-day prediction do not change. A table for f1/f2 records separate selections. Warn when the chosen grid value is at an edge.
 
 ---
 
@@ -1075,7 +652,7 @@ git commit -m "feat: closed-form cyclic RW2 backbone, BB model, inner-window (ta
   - `baselines.LGB_PARAMS = {"seed": 0, "deterministic": True, "force_col_wise": True, "verbose": -1}` with the exact marker on that line: `# ponytail: 기본 하이퍼파라미터, B1이 f1–f4에서 B0′를 못 이기면 튜닝 (FR-49)`.
   - `baselines.fit_b1(panel, train_idx, protocol, backbone, C, rounds=100) -> dict` — `backbone = (tau, half_life)`; returns `{"tau", "h", "protocol", "C", "rounds", "names", "n_rows", "mean", "q" (19 boosters), "Mq" (19 boosters), "clf" (3 boosters or None)}`.
   - `baselines.predict_b1(models, panel, d) -> dict` — prediction dict + `"Mq"` (19 sorted day quantiles).
-  - `baselines.b1_model(tau, half_life, protocol="A+", rounds=100) -> dict` (name `B1`); its `fit(panel, fold, C)` returns the full-train state with `"inner_state"` = `fit_b1` on `train \ inner_idx(fold)`.
+  - baselines.b1_model(tau,half_life,protocol="A+",rounds=100) returns a fold-fitted B1 with inner_state trained on all train dates strictly before cal_idx; the full state is trained on all train dates. It predicts every cal_idx day without including that day in fit. B1 uses the fold-specific select_tau result. Keep native LightGBM, 100-round default, 19 slot quantiles, day peak quantiles and event classifiers.
 
 **Feature definitions (FR-31, FR-32, v2 §15.4, A32).** For target day `d`, slot `q`, `op_eff, hol_eff = cal_flags(panel, protocol)`; any index < 0 gives NaN:
 - `q`, `q_mod4 = q % 4`, `sin1, cos1, sin2, cos2, sin3, cos3` = `sin/cos(2π r q / 96)`, r = 1, 2, 3; `dow`, `daytype` (0/1/2), `month`, `season` (`features.season`), `hol` (= `hol_eff[d]`), `op` (= `op_eff[d]`).
@@ -1231,283 +808,31 @@ def test_lgbm_defaults_marker():
 - [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_features.py tests/test_baselines.py -q` → failures with `AttributeError: module 'gmst.features' has no attribute 'SLOT_FEATURES'` and `… 'gmst.baselines' has no attribute 'b1_model'`.
 - [ ] **Step 3: Implement** the row builders in `gmst/features.py` and B1 in `gmst/baselines.py` (native `lightgbm.train`; import `backbone` inside `baselines`).
 - [ ] **Step 4: Run to verify they pass** — `uv run pytest tests/test_features.py tests/test_baselines.py -q` → `32 passed` (19 in test_features, 13 in test_baselines).
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/features.py gmst/baselines.py tests/test_features.py tests/test_baselines.py
-git commit -m "feat: B1 LightGBM (slot mean/quantiles, day M_d quantiles, peak classifiers) with inner-window state; A+W* oracle features"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
-### Task 9: Probability calibration (Platt, PAV), leave-one-fold-out, inner-window p*
+### Task 9: Platt, optional PAV, temporal calibration and p*
 
-**Files:**
-- Modify: `gmst/evaluate.py` (append), `tests/test_evaluate.py` (append)
+Files: gmst/evaluate.py and tests/test_evaluate.py.
 
-**Interfaces:**
-- Produces (module `gmst.evaluate`):
-  - `platt_fit(p, e, N=2000) -> tuple[float, float]` and `platt_apply(ab, p, N=2000) -> np.ndarray`
-  - `pav_fit(x, y) -> tuple[np.ndarray, np.ndarray]` and `pav_apply(model, x) -> np.ndarray`
-  - `fit_calibrator(rows, method) -> dict` (keys `"C50"`, `"C75"`, `"C90"`)
-  - `apply_calibrator(cal, rows, method) -> pl.DataFrame`
-  - `calibrate_oof(days, method="platt", inner=None, ref=None) -> tuple[pl.DataFrame, pl.DataFrame | None]`
-  - `p_star(p, e) -> float` and `p_star_table(inner) -> dict[tuple[str, str, str], dict[str, float]]` keyed `(model, variant, fold)`
+Keep platt_fit/apply and optional pav_fit/apply. calibrate_oof(days,method="platt",inner=None,ref=None) groups by (model,variant,fold). For CV rows, fit the calibrator only on that group's train-period inner_days; apply it to that outer fold and its inner rows. For final/pseudo-test rows, ref is same-(model,variant) pre-test OOF; fit once on ref and apply to the final rows and final cal rows. Never fit a CV calibrator on other outer folds. On empty calibration rows return identity and record status=default_empty; one-class rows use the ridge Platt fit, recording status=single_class and count.
 
-**Algorithm (v2 §11.3, FR-52…FR-55, A3, A24, ruling R10):**
-- Platt: `x = logit(clip(p, 1/(2N), 1 − 1/(2N)))` (N = 2,000 → [0.00025, 0.99975]); maximise `Σ[e·log σ(a x + b) + (1−e)·log(1 − σ(a x + b))] − 0.5·1e-3·(a² + b²)` by Newton (start a = 1, b = 0, ≤ 100 iterations, stop when the max |step| < 1e-10). The tiny ridge keeps separable data finite. Empty input → `(1.0, 0.0)` (identity). `platt_apply` maps NaN → NaN.
-- PAV: sort by x, merge equal x into weighted means, pool adjacent violators with weights; returns `xs` = sorted unique x and `ys` non-decreasing. `pav_apply = np.interp(x, xs, ys)` (flat outside), NaN → NaN. Empty input → `([0, 1], [0, 1])`. isotonic is an ablation (cut item ②).
-- `fit_calibrator(rows, method)`: per threshold uses rows with `usable_peak` and finite `risk_raw_C*` and `event_C*`.
-- `apply_calibrator`: writes `risk_{method}_C50/75/90`, then enforces `C50 ≥ C75 ≥ C90` row-wise with `np.minimum.accumulate` along the threshold axis (FR-50).
-- `calibrate_oof`: for each `(model, variant)` group and each fold `j` of that group in `days`: if `ref is None`, the calibrator is fit on the group's rows in `days` with fold ≠ j (leave-one-fold-out, FR-54); if `ref` is given, it is fit on all of the group's rows in `ref` (used for the test fold with `ref = f1–f4 OOF`). Apply it to fold-j rows of `days` and to fold-j rows of `inner` (same model/variant). Returns `(days, inner)`.
-- `p_star(p, e)`: candidates = sorted unique finite `p`; alarm = `p ≥ candidate`; F1 per candidate (`prf`); return the smallest candidate with maximal F1; return 0.5 if there are no events or no candidates.
-- `p_star_table(inner)`: per `(model, variant, fold)`, per threshold, `p_star(risk_platt_C*, event_C*)` over `usable_peak` inner rows. p* for fold j therefore comes only from fold j's own inner window (never its validation days); the test fold's p* comes from 08-24…08-30 (**[plan pin]**, see Spec issues).
+p_star_table(inner,expected_keys) returns one C50/C75/C90 entry for every requested (model,variant,fold). Use each group's actual calibrated cal-day predictions and events to maximize F1, ties deterministic. No usable cal events means p*=0.5 with status=default_empty; a single event class uses the specified deterministic p_star rule. Recompute the table after each new candidate, including B0/B0p/BB and all B4 variants. Store calibration status and n_cal in the existing result metadata.
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_evaluate.py`:
-
-```python
-def test_platt_recovers_true_params():
-    rng = np.random.default_rng(0)
-    x = rng.uniform(-4, 4, 20000)
-    e = rng.random(20000) < 1 / (1 + np.exp(-(1.5 * x - 0.5)))
-    a, b = ev.platt_fit(1 / (1 + np.exp(-x)), e)
-    assert a == pytest.approx(1.5, abs=0.1) and b == pytest.approx(-0.5, abs=0.1)
-
-
-def test_platt_clipping_and_degenerate():
-    ab = ev.platt_fit(np.array([0.0, 1.0, 0.0, 1.0]), np.array([0, 1, 0, 1]))
-    out = ev.platt_apply(ab, np.array([0.0, 1.0, np.nan]))
-    assert np.isfinite(out[:2]).all() and out[0] < out[1] and np.isnan(out[2])
-    assert np.isfinite(ev.platt_apply(ev.platt_fit(np.array([0.2, 0.4]), np.array([0, 0])), np.array([0.3]))).all()
-    assert ev.platt_fit(np.array([]), np.array([])) == (1.0, 0.0)
-
-
-def test_pav():
-    xs, ys = ev.pav_fit(np.array([1.0, 2, 3, 4]), np.array([1.0, 3, 2, 4]))
-    assert ys.tolist() == pytest.approx([1, 2.5, 2.5, 4])
-    assert ev.pav_apply((xs, ys), np.array([0.0, 2.5, 9.0])).tolist() == pytest.approx([1, 2.5, 4])
-    rng = np.random.default_rng(0)
-    x = rng.random(200)
-    _, ys = ev.pav_fit(x, (rng.random(200) < x).astype(float))
-    assert (np.diff(ys) >= -1e-12).all()
-
-
-def cal_days(seed, flip_fold=None, folds=("f1", "f2", "f3", "f4")):
-    rng = np.random.default_rng(seed)
-    rows = []
-    for f in folds:
-        raw = rng.random(40)
-        evt = rng.random(40) < raw
-        if f == flip_fold:
-            evt = ~evt
-        for r, e in zip(raw, evt):
-            rows.append({"fold": f, "variant": "main", "model": "M", "usable_peak": True,
-                         **{f"risk_raw_C{c}": float(r) for c in (50, 75, 90)},
-                         **{f"risk_{m}_C{c}": float("nan") for m in ("platt", "iso") for c in (50, 75, 90)},
-                         **{f"event_C{c}": float(e) for c in (50, 75, 90)}})
-    return pl.DataFrame(rows)
-
-
-def test_calibrate_oof_leave_one_fold_out():
-    a, _ = ev.calibrate_oof(cal_days(0), "platt")
-    b, _ = ev.calibrate_oof(cal_days(0, flip_fold="f2"), "platt")
-    col = lambda d, f: d.filter(pl.col("fold") == f)["risk_platt_C90"].to_numpy()
-    assert np.array_equal(col(a, "f2"), col(b, "f2"))
-    assert not np.array_equal(col(a, "f1"), col(b, "f1"))
-
-
-def test_calibrated_risk_monotone_in_C():
-    df = cal_days(3).with_columns(pl.lit(0.99).alias("risk_raw_C90"))
-    for method in ("platt", "iso"):
-        out, _ = ev.calibrate_oof(df, method)
-        r = out.select(f"risk_{method}_C50", f"risk_{method}_C75", f"risk_{method}_C90").to_numpy()
-        assert (r[:, 0] >= r[:, 1]).all() and (r[:, 1] >= r[:, 2]).all()
-
-
-def test_inner_rows_use_own_fold_calibrator():
-    inner = cal_days(1).filter(pl.col("fold") == "f3")
-    _, a = ev.calibrate_oof(cal_days(0), "platt", inner)
-    _, b = ev.calibrate_oof(cal_days(0, flip_fold="f3"), "platt", inner)
-    assert np.array_equal(a["risk_platt_C90"].to_numpy(), b["risk_platt_C90"].to_numpy())
-    assert np.isfinite(a["risk_platt_C90"].to_numpy()).all()
-
-
-def test_reference_calibration_for_test_fold():
-    ref = cal_days(0)
-    test = cal_days(5, folds=("test",))
-    out, _ = ev.calibrate_oof(test, "platt", ref=ref)
-    ab = ev.platt_fit(ref["risk_raw_C50"].to_numpy(), ref["event_C50"].to_numpy())
-    assert out["risk_platt_C50"].to_numpy() == pytest.approx(ev.platt_apply(ab, test["risk_raw_C50"].to_numpy()))
-
-
-def test_p_star():
-    assert ev.p_star(np.array([0.1, 0.2, 0.3, 0.8, 0.9]), np.array([0, 0, 1, 1, 1])) == pytest.approx(0.3)
-    assert ev.p_star(np.array([0.4, 0.4]), np.array([0, 0])) == 0.5
-
-
-def test_p_star_table():
-    inner = pl.DataFrame({"fold": ["f1"] * 5, "variant": ["main"] * 5, "model": ["M"] * 5, "usable_peak": [True] * 5,
-                          **{f"risk_platt_C{c}": [0.1, 0.2, 0.3, 0.8, 0.9] for c in (50, 75, 90)},
-                          **{f"event_C{c}": [0.0, 0.0, 1.0, 1.0, 1.0] for c in (50, 75, 90)}})
-    assert ev.p_star_table(inner)[("M", "main", "f1")] == pytest.approx({"C50": 0.3, "C75": 0.3, "C90": 0.3})
-```
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_evaluate.py -q` → `AttributeError: module 'gmst.evaluate' has no attribute 'platt_fit'`.
-- [ ] **Step 3: Implement** the calibration functions (numpy Newton, numpy PAV).
-- [ ] **Step 4: Run to verify they pass** — `uv run pytest tests/test_evaluate.py -q` → `24 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/evaluate.py tests/test_evaluate.py
-git commit -m "feat: Platt (clipped logit, Newton) and PAV calibration, leave-one-fold-out, inner-window p*"
-```
+Acceptance: perturb a fold's outer labels and assert its calibrator and p* unchanged. Perturb a later fold and assert an earlier fold's calibrated probabilities unchanged. Test H/IO/KAN same-variant reference lookup and complete expected keys.
 
 ---
 
-### Task 10: Peak-risk discrimination check, climatology, day-block bootstrap, DM, B1-benchmark gate, B4-family selection
+### Task 10: Risk metrics, bootstrap and B4 selection
 
-**Files:**
-- Modify: `gmst/evaluate.py` (append), `tests/test_evaluate.py` (append)
+Files: gmst/evaluate.py and tests/test_evaluate.py.
 
-**Interfaces:**
-- Consumes: Tasks 5, 6, 9.
-- Produces (module `gmst.evaluate`):
-  - `climatology(M, op, dtype, C) -> dict` — `{"base": (3,), "cond": {(op, dtype): (3,)}, "op": {op: (3,)}}` event rates `M > C_j`.
-  - `clim_prob(clim, op, dtype) -> np.ndarray` (3,) — `cond[(op, dtype)]` if present, else `op[op]`, else `base` (holidays not in the class, ruling Q8).
-  - `add_climatology(days, panel) -> pl.DataFrame` — adds `clim_C50/75/90`, `climcond_C50/75/90`, `op_true` (Int8), `dtype` (Int8) per row; the fold's climatology uses that fold's `train` days with `usable_peak`, their daily max, true `op`, `dtype`, and the row's own `C50/C75/C90`.
-  - `risk_metrics(days, panel, p_star) -> pl.DataFrame` — same long schema as `point_metrics`; metrics `brier_platt_C*`, `brier_iso_C*`, `brier_mean_platt`, `brier_mean_iso`, `brier_clim_C*`, `brier_climcond_C*`, `bss_cond_C*` (= 1 − Brier_platt / Brier_climcond), and for each `k ∈ {p05, pstar}`: `f1_C*_k`, `precision_C*_k`, `recall_C*_k`, `fn_C*_k`, `fp_C*_k` (alarm = `risk_platt ≥ 0.5` or `≥ p_star[(model, variant, fold)][C]`; pooled rows use each row's own fold p*). Folds, `pooled` and strata exactly as `point_metrics`. NaN F1/precision/recall when undefined (f4 q90: no events).
-  - `risk_check(days) -> dict` — keyed `"<model>/<variant>"`; per `C50/C75/C90`: `brier` (Platt), `brier_climcond`, `auc`, `bss_cond`, `n_events`, `n_days`, `pass`; plus `"discrimination_missing": not all(pass)`. Uses rows with fold in `FOLDS_CV` and `usable_peak` (pooled f1–f4). `pass = brier < brier_climcond and auc >= 0.70 and bss_cond > 0`; when the pooled events are single-class, `pass = bss_cond > 0` and `auc` = NaN (FR-41, A26, v2 §11.3).
-  - `bootstrap_days(panel) -> np.ndarray` — f1–f4 validation day indices that are not `is_suspect` (ruling R5: 54 days; the fully masked copy day 07-30 stays in the set with zero weight — see Spec issues).
-  - `day_losses(slots, days, panel) -> pl.DataFrame` — one row per bootstrap day: `fold, date, ae_sum, n_pts, crps_sum, n_crps, brier_sum, n_brier` (`brier_sum` = mean over the three thresholds of `(risk_platt − event)²` on a `usable_peak` day else 0; `n_brier` = 1 or 0).
-  - `block_bootstrap(num, den, B=2000, seed=0) -> tuple[float, float, float]` — statistic `Σnum/Σden`; `rng = np.random.default_rng(seed)`; `idx = rng.integers(0, n, size=(B, n))`; replicate ratios; `(stat, nanpercentile 2.5, nanpercentile 97.5)`.
-  - `dm_test(d) -> tuple[float, float]` — finite daily differentials; `stat = mean / (sd_ddof1 / sqrt(n))`; `p = math.erfc(abs(stat) / sqrt(2))`; `sd == 0` → `stat = 0.0` if mean is 0 else `±inf`.
-  - `compare(slots_a, days_a, slots_b, days_b, panel, name, metrics=("mae", "crps", "brier_mean"), B=2000, seed=0) -> list[dict]` — rows `{comparison, metric, delta, ci_lo, ci_hi, dm_stat, dm_p, n_days}` for `a − b` (FR-56). `mae`: num = `ae_sum_a − ae_sum_b`, den = `n_pts` (assert equal masks); `crps`: `crps_sum` diff over `n_crps`; `brier_mean`: `brier_sum` diff over `n_brier`. DM series = per-day `num/den` where `den > 0`. The resampled day set = `bootstrap_days(panel)` restricted to days present in both frames; `n_days` = its size (54 in the full run, 14 in the f4-only smoke run). Marker in this function: `# ponytail: 일 블록 부트스트랩, 요일 간 상관이 크면 7일 블록 (A13)`.
-  - `gate_pass(boot, comparison) -> bool` — the rows of `boot` with that `comparison` (e.g. `"B4-B1"`, `"B4-H-B1"`); `True` iff the `mae` and `brier_mean` rows both have `ci_hi < 0` (US-008 as amended, FR-57). This is the **success criterion** of the B4 family against the B1 benchmark, not a switch: B1 is never submitted (user decision). CRPS never enters (ruling Q5). (**[plan pin]**: the PRD writes `gate_pass(variant_metrics, b1_metrics)`; the plan passes the bootstrap rows that already hold both.)
-  - `select_variant(candidates: dict[str, dict]) -> dict` (US-021, FR-110) — `candidates` maps variant IDs in tried order (`"main"`, `"H"`, `"IO"`, `"KAN"`) to `{"mae": float, "brier_mean": float, "gate_met": bool, "gap": {"mae": [d, lo, hi], "brier_mean": [d, lo, hi]}}`. Pool = the candidates with `gate_met` if any, else all; winner = lowest `mae`, ties by lowest `brier_mean`, then tried order. Returns `{"submitted": <variant ID>, "gate_met": bool (the winner's), "tried": [IDs in order], "remaining_gap_to_b1": <winner's gap>}`.
+bootstrap_days(panel) derives f1–f4 validation dates with ≥1 finite target; current data yields 53 (07-13, 07-15, 07-30 excluded; 08-28/29 included). Point and day-risk metrics use their own valid denominators. compare uses those dates and records n_days=53 for a full run. The 2,000-replicate day bootstrap preserves within-day dependence. Check serial correlation in day losses; if present, report a 7-day moving-block sensitivity CI. Label the simple normal day-loss test as DM-like unless autocorrelation-robust variance is implemented.
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_evaluate.py`:
+risk_metrics requires a p* entry for each (model,variant,fold) it evaluates. Isotonic metrics exist only if isotonic ran; the status table records not_run otherwise. gate_pass requires both MAE and mean Platt Brier CI upper bounds below zero versus the fixed B1. select_variant returns a B4-family variant, using OOF MAE then mean Brier for ties, and reports every attempted candidate. All CIs are exploratory after trying multiple variants, with attempted count and caveat in the report.
 
-```python
-from gmst import baselines as bl
-
-
-def test_climatology_conditional():
-    M = np.array([200.0, 150.0, 210.0, 100.0, 190.0, 300.0])
-    op = np.array([1, 1, 1, 0, 1, 1])
-    dt = np.array([0, 0, 1, 0, 1, 2])
-    cl = ev.climatology(M, op, dt, np.array([180.0, 195.0, 205.0]))
-    assert cl["base"] == pytest.approx([4 / 6, 3 / 6, 2 / 6])
-    assert ev.clim_prob(cl, 1, 0) == pytest.approx([0.5, 0.5, 0.0])
-    assert ev.clim_prob(cl, 1, 1) == pytest.approx([1.0, 0.5, 0.5])
-    assert ev.clim_prob(cl, 0, 2) == pytest.approx([0.0, 0.0, 0.0])      # empty class -> op-only rate
-    assert ev.clim_prob(cl, 1, 2) == pytest.approx([1.0, 1.0, 1.0])
-
-
-def risk_days(p, e):
-    n = len(e)
-    return pl.DataFrame({"fold": ["f1"] * (n // 2) + ["f2"] * (n - n // 2), "variant": ["main"] * n,
-                         "model": ["M"] * n, "usable_peak": [True] * n,
-                         **{f"risk_platt_C{c}": p for c in (50, 75, 90)},
-                         **{f"event_C{c}": e for c in (50, 75, 90)},
-                         **{f"climcond_C{c}": [0.5] * n for c in (50, 75, 90)}})
-
-
-def test_risk_check_pass_and_fail():
-    e = [0.0, 1.0] * 10
-    good = ev.risk_check(risk_days([0.1, 0.9] * 10, e))["M/main"]
-    assert good["C90"]["pass"] and not good["discrimination_missing"]
-    flat = ev.risk_check(risk_days([0.5] * 20, e))["M/main"]
-    assert flat["C90"]["auc"] == pytest.approx(0.5) and flat["discrimination_missing"]
-    one = ev.risk_check(risk_days([0.1] * 20, [0.0] * 20))["M/main"]["C90"]
-    assert np.isnan(one["auc"]) and one["pass"] == (one["bss_cond"] > 0) and one["n_events"] == 0
-
-
-def test_block_bootstrap_ci_contains_truth():
-    rng = np.random.default_rng(0)
-    den = rng.integers(50, 97, 60).astype(float)
-    eps = rng.normal(0, 1, 60)
-    eps -= (den * eps).sum() / den.sum()                  # weighted mean exactly 0 -> statistic is exactly -2
-    num = den * (-2.0 + eps)
-    d, lo, hi = ev.block_bootstrap(num, den, B=2000, seed=0)
-    assert d == pytest.approx(-2.0) and lo < -2.0 < hi
-    assert ev.block_bootstrap(num, den, B=2000, seed=0) == (d, lo, hi)
-
-
-def test_dm_test():
-    stat, p = ev.dm_test(np.array([1.0, -1.0] * 50))
-    assert stat == pytest.approx(0.0) and p == pytest.approx(1.0)
-    stat, p = ev.dm_test(np.array([6.0, 4.0] * 50))
-    assert stat > 10 and p < 1e-10
-
-
-@pytest.mark.parametrize("mae_hi,brier_hi,met", [(-0.1, -0.01, True), (0.1, -0.01, False),
-                                                 (-0.1, 0.01, False), (0.1, 0.01, False)])
-def test_gate_pass(mae_hi, brier_hi, met):
-    boot = pl.DataFrame({"comparison": ["B4-B1"] * 3 + ["AWstar-main"],
-                         "metric": ["mae", "brier_mean", "crps", "mae"],
-                         "delta": [-1.0, -0.02, -5.0, 9.0], "ci_lo": [-2.0, -0.05, -9.0, 8.0],
-                         "ci_hi": [mae_hi, brier_hi, -1.0, -10.0],
-                         "dm_stat": [0.0] * 4, "dm_p": [1.0] * 4, "n_days": [54] * 4})
-    assert ev.gate_pass(boot, "B4-B1") is met
-
-
-def cand(mae, brier, met):
-    return {"mae": mae, "brier_mean": brier, "gate_met": met, "gap": {"mae": [mae - 12.0, -1.0, 1.0],
-                                                                     "brier_mean": [0.0, -0.01, 0.01]}}
-
-
-def test_select_variant():
-    out = ev.select_variant({"main": cand(12.0, 0.10, False), "H": cand(11.0, 0.12, True), "IO": cand(10.0, 0.11, False)})
-    assert out["submitted"] == "H" and out["gate_met"] is True and out["tried"] == ["main", "H", "IO"]
-    assert out["remaining_gap_to_b1"]["mae"][0] == pytest.approx(-1.0)
-    out = ev.select_variant({"main": cand(12.0, 0.10, False), "H": cand(11.0, 0.12, False), "IO": cand(11.0, 0.11, False)})
-    assert out["submitted"] == "IO" and out["gate_met"] is False
-    out = ev.select_variant({"main": cand(12.0, 0.10, True), "H": cand(11.5, 0.12, True)})
-    assert out["submitted"] == "H"
-    assert ev.select_variant({"main": cand(12.0, 0.10, False)})["submitted"] == "main"
-
-
-def test_bootstrap_day_set_matches_day_table(panel):
-    idx = ev.bootstrap_days(panel)
-    days = panel["days"]
-    expected = [int(i) for f in ev.FOLDS_CV for i in ft.role_idx(panel, f, "val") if not days["is_suspect"][int(i)]]
-    assert sorted(idx.tolist()) == sorted(expected)
-    assert len(expected) == 54            # ruling R5 / FR-56 / v2 A13
-
-
-def test_compare_rows(panel):
-    a = ev.rolling_origin(bl.b0_model(), panel)
-    b = ev.rolling_origin(bl.b0p_model(), panel)
-    rows = ev.compare(a[0], a[1], b[0], b[1], panel, "B0-B0p", metrics=("mae",), B=200)
-    assert rows[0]["comparison"] == "B0-B0p" and rows[0]["metric"] == "mae" and rows[0]["n_days"] == 54
-    mae_a = ev.mae(a[0]["y_true"].to_numpy(), a[0]["y_median"].to_numpy())[0]
-    mae_b = ev.mae(b[0]["y_true"].to_numpy(), b[0]["y_median"].to_numpy())[0]
-    assert rows[0]["delta"] == pytest.approx(mae_a - mae_b)
-    assert rows[0]["ci_lo"] <= rows[0]["delta"] <= rows[0]["ci_hi"]
-
-
-def test_risk_metrics_names(panel):
-    _, days, _, _ = ev.rolling_origin(bl.b0p_model(), panel)
-    days = days.with_columns([pl.col(f"risk_raw_C{c}").alias(f"risk_{m}_C{c}")
-                              for m in ("platt", "iso") for c in (50, 75, 90)])
-    ps = {("B0p", "main", f): {"C50": 0.5, "C75": 0.5, "C90": 0.5} for f in ev.FOLDS_CV}
-    m = ev.risk_metrics(ev.add_climatology(days, panel), panel, ps)
-    names = set(m["metric"].unique())
-    for c in ("C50", "C75", "C90"):
-        assert {f"brier_platt_{c}", f"brier_iso_{c}", f"brier_clim_{c}", f"brier_climcond_{c}", f"bss_cond_{c}",
-                f"f1_{c}_p05", f"f1_{c}_pstar", f"precision_{c}_pstar", f"recall_{c}_p05", f"fn_{c}_pstar",
-                f"fp_{c}_p05"} <= names
-    assert {"brier_mean_platt", "brier_mean_iso"} <= names
-    f4 = m.filter((pl.col("fold") == "f4") & (pl.col("stratum") == "all") & (pl.col("metric") == "f1_C90_pstar"))
-    assert np.isnan(f4["value"][0])
-```
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_evaluate.py -q` → `AttributeError: module 'gmst.evaluate' has no attribute 'climatology'`.
-- [ ] **Step 3: Implement** the Task 10 functions.
-- [ ] **Step 4: Run to verify they pass** — `uv run pytest tests/test_evaluate.py -q` → `36 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/evaluate.py tests/test_evaluate.py
-git commit -m "feat: conditional climatology, risk discrimination check (AUC/BSS), day-block bootstrap, DM, B1 gate, B4-family selection"
-```
+Acceptance: assert derived 53 days and distinct valid denominators; missing p* key raises; no iso and no K4 runs pass when marked not_run; selecting H preserves model=B4, variant=H and submitted ID B4-H.
 
 ---
 
@@ -1531,7 +856,7 @@ git commit -m "feat: conditional climatology, risk discrimination check (AUC/BSS
     - Methods: `trans(z) -> A` (…, K, K) — `A_t(i, ·) = softmax` over `j` of the logits with the `j = i` logit fixed at 0 (FR-64); `z` shape (…, dz) (ignored when `cond=False`). `delta() -> (K, 2)`, `sigma() -> (K, 2)`, `phi() -> (K,)`. `emission(m, opt) -> (mu, sig)` with `mu[..., k] = m + δ[k, opt]` and `sig[..., k] = σ[k, opt]` (FR-65).
     - Trainable parameter counts: K(K−1)(1+dz) + 5K (4K when `ar=False`; K(K−1) transitions when `cond=False`) (FR-64, FR-65).
   - `stationary(A) -> π` (…, K) with `π A = π`, `Σπ = 1` (linear solve of `(Aᵀ − I)` with its last row replaced by ones), differentiable.
-  - `forward_logp(model, y, obs, m, opt, z) -> tuple[Tensor, Tensor]` — inputs (B, T) / (B, T, dz); returns `logc` (B, T) and filtered `alpha` (B, T, K). Algorithm (FR-66, FR-67, v2 §10): replace unobserved `y` by 0 before use; log-emission `lb[t, i, k]` = `log N(y_t; μ_{t,k} + φ_k (y_{t−1} − μ_{t−1,i}), σ²_{t,k})` when `obs[t]` and `obs[t−1]` and `t > 0`; `log N(y_t; μ_{t,k}, σ²_{t,k}/(1 − φ_k²))` when `obs[t]` and (`t = 0` or not `obs[t−1]`); 0 when not `obs[t]`. Prior `α̃_0 = stationary(A_0) ⊙ exp(lb[0, 0, :])`. For t ≥ 1: `s_t = max_{i,k} lb[t]`, `α̃_t(k) = Σ_i α_{t−1}(i) A_t(i,k) exp(lb[t,i,k] − s_t)`, `c_t = Σ_k α̃_t(k)`, `logc_t = log c_t + s_t`, `α_t = α̃_t / c_t` (same shift at t = 0). Precompute `A` and `lb` for all t in one shot; only the recursion loops over t.
+  - forward_logp(model,y,obs,m,opt,z) returns scaled log contributions and filtered state probabilities. Pairwise AR emission uses the previous observed slot when available. If the immediate predecessor is missing, restart from the state stationary variance as an explicit approximation, not exact marginalization; the last observed residual is not propagated across the gap. A one-state check compares its result to the analytic one-gap Y3|Y1 mean φ²Y1 and variance σ²(1+φ²).
   - `backward(model, y, obs, m, opt, z) -> gamma` (B, T, K) — smoothed marginals `P(S_t = k | y_{1:T})` via the scaled backward pass `β_{t−1}(i) = Σ_k A_t(i,k) exp(lb[t,i,k] − logc_t) β_t(k)`, `β_{T−1} = 1`, `γ = α β` renormalised per step.
   - `make_blocks(panel, day_idx, m, protocol, device="cpu", dtype=torch.float32) -> dict | None` — one block per `d ∈ day_idx` with `d ≥ 1` and ≥ 1 finite `Y[d]`: keys `y, obs, m, opt, z` over 192 steps (day d−1 then day d; `opt` = `op_eff` of each step's day), `days` (np.ndarray of target indices). `None` when empty (FR-68).
   - `nll(model, blocks) -> Tensor` = `−logc[:, 96:].sum() / obs[:, 96:].sum()` (per observed target slot, v2 §14).
@@ -1736,398 +1061,37 @@ def test_occ_floor_penalty():
 - [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_hmm.py -q` → `ModuleNotFoundError: No module named 'gmst.hmm'`.
 - [ ] **Step 3: Implement** the Task 11 part of `gmst/hmm.py`. Keep everything dtype-generic (tests run the model in float64 on CPU; production runs float32 on `DEVICE`).
 - [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_hmm.py -q` → `22 passed`; also `CUDA_VISIBLE_DEVICES="" uv run pytest tests/test_hmm.py -q` → `22 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/hmm.py tests/test_hmm.py
-git commit -m "feat: conditional HMM with ordered deviation states, pairwise AR(1) emission, scaled forward/backward, block training"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
-### Task 12: MC peak risk, analytic φ=0 risk, model ladder B2/B3/B4, K ablations, day random-effect diagnostic
+### Task 12: MC risk, model ladder and evaluation NLL
 
-**Files:**
-- Modify: `gmst/hmm.py` (append), `tests/test_hmm.py` (append)
+Files: gmst/hmm.py and tests/test_hmm.py.
 
-**Interfaces:**
-- Consumes: Task 11, `backbone.fold_backbone`, `features.role_idx`, `features.inner_idx`, `evaluate.rolling_origin`, `evaluate.thresholds`, `evaluate.TAUS`.
-- Produces (module `gmst.hmm`):
-  - `forecast(model, panel, d, m, C, protocol="A+", N=2000, re=False, s_op=None, seed=None, device=None) -> dict` — prediction dict with `paths` (N, 96) float64 numpy. `device` defaults to the model's device; `seed` defaults to `int(panel["dates"][d].strftime("%Y%m%d"))`.
-  - `analytic_risk(model, panel, d, m, C, protocol="A+", device=None) -> np.ndarray` (3,)
-  - `sigma_re(sigma, phi, s) -> np.ndarray`
-  - `day_resid_sd(panel, train_idx, m) -> np.ndarray` (2,) indexed by op
-  - `final_epochs(best: list[int]) -> int` = `int(np.floor(np.median(best) + 0.5))`
-  - `hmm_model(kind="B4", protocol="A+", K=3, re=False, tau=10.0, half_life=60, final_epochs=None, max_epochs=300, patience=20, N=2000, train_from=None, occ_floor=False, seed=0, device=DEVICE) -> dict` — name = `kind`; keys `name, fit, predict, posthoc`. (Tasks 21–23 add the improvement-loop arguments `emission_source`, `decoder`, `kan`.)
+Keep the B2/B3/B4 factory, common-random-number MC paths, analytic φ=0 risk, K2/K3 and diagnostic re model behavior from PRD FR-69–75. K4 is optional; when cut, record not_run and do not require its OOF rows. hmm_model(kind,protocol,K,tau,half_life,...) produces a fit state with model,m,C,s_op,best_epoch,history,device,protocol,kind,K,train_idx,inner_state. It does not read outer validation targets or store val_nll in fit. Its inner_state extractor returns a calibration state fitted on train dates before cal_idx and predicts cal_idx; tuning/early stopping uses only tune_idx and fit_idx; full model refits on all train for outer prediction. If tune_idx is empty, use a predeclared fixed epoch count (20 in smoke, 100 in full) and status=default_empty. The test fold uses final pre-September selection and full fit.
 
-**Algorithm (v2 §8–§11, FR-69…FR-75, A8–A10, A30):**
-- `forecast`: `pi, y_last = filter_last(model, panel, d, m, protocol)`; transition matrices `A_h` from `z_features(panel, protocol, [d])` (h = 0…95 is the transition into slot h of day d); `mu, sig` for day d (op_eff[d]) and `mu_last = m[d−1, 95] + δ[:, op_eff[d−1]]`. Draw, in this fixed order from one `torch.Generator(device).manual_seed(seed)`: `u0` (N) uniform, `e0n` (N) normal, `u` (N, 96) uniform, `eps` (N, 96) normal, `ure` (N) normal — always all five, so the same seed gives common random numbers across scenarios. `S_0` = inverse-CDF of `pi` at `u0`; `e_0 = y_last − mu_last[S_0]` if `y_last` is finite else `e0n · σ_{S_0,op(d−1)} / sqrt(1 − φ²_{S_0})` (FR-71, 수정-5); for h: `S_h` = inverse-CDF of `A_h[S_{h−1}]` at `u[:, h]`, `e_h = φ_{S_h} e_{h−1} + σ_{S_h,op(d)} eps[:, h]`, `Y_h = μ_{h,S_h} + e_h`. With `re=True` (the §11.5 **diagnostic** ablation, FR-75, A30 — not a loop step; B4-IO subsumes its role): every σ is replaced by `sigma_re(σ, φ, s_op[op(d)])` and `u_d = ure · s_op[op(d)]` is added to all 96 slots of each path. Summaries on CPU numpy float64: `y_mean = paths.mean(0)`, `y_median = np.median(paths, 0)`, `q = np.quantile(paths, TAUS, axis=0)`, `M = paths.max(1)`, `M_hat_median = np.median(M)`, `M_hat_mean = M.mean()`, `peak_time_mode = np.bincount(paths.argmax(1), minlength=96).argmax()` (earliest on ties), `risk_raw = (M[:, None] > C).mean(0)`; if `model.phi()` is identically 0 (B2/B3) `risk_raw = analytic_risk(...)` instead (FR-72).
-- `analytic_risk` (v2 §11.2): `P(M ≤ C) = π · Π_h [A_h · diag(Φ((C − μ_{h,k}) / σ_{k,op(d)}))] · 1`, computed in float64 on CPU with per-step renormalisation (accumulate the log of each step's sum; a zero sum gives probability 0); returns `1 − P` for the three thresholds. Only valid for φ = 0.
-- `sigma_re(sigma, phi, s)`: `v = σ² / (1 − φ²)`, `v' = max(v − s², 1)`, `σ' = sqrt(v' (1 − φ²))` (elementwise). Marker: `# ponytail: 적률 분해로 σ 재추정, re 결과가 보고서 결론을 좌우하면 u_d를 넣은 우도로 재학습 (FR-75)`.
-- `day_resid_sd(panel, train_idx, m)`: for train days with ≥ 1 finite Y: `r_d = nanmean(Y[d] − m[d])`; per true op `o`, `std(r_d, ddof=1)` (0.0 when fewer than 2 days).
-- `hmm_model(kind, …)`: `kind` → `(cond, ar)` = B2 `(False, False)`, B3 `(True, False)`, B4 `(True, True)`. `fit(panel, fold, C)`: `tr = role_idx(panel, fold, "train")`; if `train_from` is set, `assert fold in ("f2", "f3", "f4")` and keep `tr` dates ≥ `train_from` (SCENARIO, FR-87); `inn = intersect(inner_idx(panel, fold), tr)`; `m_full = fold_backbone(panel, tr, tau, half_life, protocol)`, `m_in = fold_backbone(panel, setdiff(tr, inn), …)`; if `fold == "test"`: `assert final_epochs is not None` and `fit_with_inner(..., epochs=final_epochs)`, else early stopping (`max_epochs`, `patience`). State keys: `model, m, C, s_op (day_resid_sd on tr with m_full), best_epoch, history, val_nll (nll of the refit model on the fold's val blocks; NaN for test), device, protocol, kind, K, train_idx (= tr), inner_state` where `inner_state = {"model": inner_model, "m": m_in, "C": C, "s_op": day_resid_sd(setdiff(tr, inn), m_in), "device": device}`. `predict(state, panel, d)` = `forecast(state["model"], panel, d, state["m"], state["C"], protocol, N, re, state["s_op"], device=state["device"])`. `posthoc = posthoc_states`.
-- Variants run later (Task 18): `K2`, `K4` (`hmm_model("B4", K=2|4)`), `re` (`hmm_model("B4", re=True)` reusing the B4 main states through `rolling_origin(states=…)`, no retraining; diagnostic only), `copies`/`suspect` (other panels), `protoA` (`protocol="A"`), `B` (SCENARIO: `protocol="B"`, `train_from=date(2021, 7, 1)`, folds f2–f4). §11.5 order (v2 as amended): check B3, B4 (and B4-H when it exists) with `risk_check` → if discrimination is missing, read the `re` diagnostic → continue the improvement loop (B4-IO, B4-KAN, Tasks 22–23). B1 is never a fallback.
+Outer NLL is computed by evaluate in the metrics stage, after prediction, from the fixed model and outer observations. Perturbing outer targets cannot change the fit state. Missing predecessor AR behavior remains the documented stationary-reset approximation; add the one-state one-gap analytic comparison check. Compare daily risk dispersion, AUC, conditional Brier skill and peak quantile coverage for B4/IO/re before claiming peak-risk improvement.
 
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_hmm.py`:
-
-```python
-from gmst import evaluate as ev
-
-
-@pytest.fixture(scope="module")
-def fitted():
-    p = ft.load_panel()
-    model = hmm.hmm_model("B4", tau=10.0, half_life=60, max_epochs=3, N=200, device="cpu")
-    C, _ = ev.thresholds(p, ft.role_idx(p, "f1", "train"))
-    return p, model, model["fit"](p, "f1", C)
-
-
-def test_forecast_contract(fitted):
-    p, model, state = fitted
-    d = p["dates"].index(date(2021, 7, 7))
-    a, b = model["predict"](state, p, d), model["predict"](state, p, d)
-    assert a["paths"].shape == (200, 96) and a["q"].shape == (19, 96)
-    assert (np.diff(a["q"], axis=0) >= 0).all() and 0 <= a["peak_time_mode"] <= 95
-    assert a["risk_raw"][0] >= a["risk_raw"][1] >= a["risk_raw"][2]
-    for k in ("y_mean", "y_median", "q", "paths", "risk_raw"):
-        assert np.array_equal(a[k], b[k])
-
-
-def toy_panel():
-    return {"dates": [date(2021, 7, 5), date(2021, 7, 6)], "Y": np.zeros((2, 96)),
-            "X": {k: np.zeros((2, 96)) for k in ("생산량", "기온", "풍속", "습도", "강수량_증분")},
-            "op": np.array([1, 1], np.int8), "hol": np.zeros(2, np.int8), "dtype": np.zeros(2, np.int8),
-            "is_missing": np.zeros((2, 96), bool)}
-
-
-def toy_model():
-    model = hmm.CondHMM(K=3, dz=14, cond=False, ar=True, seed=0).double()
-    with torch.no_grad():
-        model.rho.fill_(-30.0)
-        model.rho[0].zero_()
-        model.s.fill_(math.log(math.e ** 2 - 1))        # sigma = 1 + softplus(s) = 3
-        model.psi.fill_(math.log(4.0))                   # phi = 0.8
-    return model
-
-
-def test_e0_stationary_when_last_obs_masked():
-    model, m, C = toy_model(), np.zeros((2, 96)), np.array([1e9, 1e9, 1e9])
-    masked = toy_panel()
-    masked["Y"][0] = np.nan
-    out = hmm.forecast(model, masked, 1, m, C, N=20000, seed=0, device="cpu")
-    assert np.var(out["paths"][:, 0]) == pytest.approx(25.0, rel=0.10)    # sigma^2 / (1 - phi^2)
-    out = hmm.forecast(model, toy_panel(), 1, m, C, N=20000, seed=0, device="cpu")
-    assert np.var(out["paths"][:, 0]) == pytest.approx(9.0, rel=0.10)     # e0 = 0 observed
-
-
-def test_analytic_matches_mc_when_phi_zero():
-    p = ft.load_panel()
-    model = rand_model(K=3, dz=14, cond=True, ar=False, seed=5, scale=0.3).float()
-    m = np.tile(np.linspace(60, 170, 96), (257, 1))
-    d = p["dates"].index(date(2021, 7, 7))
-    C = np.array([185.0, 195.0, 205.0])
-    mc = (hmm.forecast(model, p, d, m, C, N=20000, seed=0, device="cpu")["paths"].max(1)[:, None] > C).mean(0)
-    an = hmm.analytic_risk(model, p, d, m, C, device="cpu")
-    tol = 3 * np.sqrt(an * (1 - an) / 20000) + 1 / 20000
-    assert (np.abs(mc - an) <= tol).all()
-
-
-def test_sigma_re():
-    assert hmm.sigma_re(np.array([3.0]), np.array([0.8]), 4.0)[0] == pytest.approx(1.8)
-    assert hmm.sigma_re(np.array([1.0]), np.array([0.0]), 50.0)[0] == pytest.approx(1.0)
-
-
-def test_re_adds_day_level_variance(fitted):
-    p, _, state = fitted
-    d = p["dates"].index(date(2021, 7, 7))
-    base = hmm.hmm_model("B4", tau=10.0, half_life=60, N=2000, device="cpu")
-    re = hmm.hmm_model("B4", tau=10.0, half_life=60, N=2000, re=True, device="cpu")
-    assert state["s_op"][1] > 0
-    assert np.var(re["predict"](state, p, d)["paths"].mean(1)) > np.var(base["predict"](state, p, d)["paths"].mean(1))
-
-
-def test_final_epochs():
-    assert hmm.final_epochs([10, 13, 20, 8]) == 12 and hmm.final_epochs([10, 15]) == 13 and hmm.final_epochs([7]) == 7
-
-
-def test_inner_state_and_test_fold_rules(fitted):
-    p, model, state = fitted
-    assert state["best_epoch"] >= 1 and np.isfinite(state["history"][0]["val_nll"])
-    assert not all(torch.equal(x, y) for x, y in zip(state["model"].state_dict().values(),
-                                                     state["inner_state"]["model"].state_dict().values()))
-    with pytest.raises(AssertionError):
-        model["fit"](p, "test", np.array([186.5, 198.0, 210.7]))
-    with pytest.raises(AssertionError):
-        hmm.hmm_model("B4", protocol="B", train_from=date(2021, 7, 1), max_epochs=1, device="cpu")["fit"](
-            p, "f1", np.array([181.0, 189.5, 198.0]))
-
-
-@pytest.mark.parametrize("kind", ["B2", "B3", "B4"])
-def test_ladder_rows(kind):
-    p = ft.load_panel()
-    slots, days, states, inner = ev.rolling_origin(
-        hmm.hmm_model(kind, tau=10.0, half_life=60, max_epochs=2, N=50, device="cpu"), p)
-    assert slots.height == 5376 and days.height == 56 and inner.height == 28
-    assert set(days["model"].unique()) == {kind}
-    assert slots["state_smooth"].null_count() == 0 and set(slots["state_smooth"].unique()) <= {1, 2, 3}
-    assert all(s["best_epoch"] >= 1 for s in states.values())
-```
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_hmm.py -q` → `AttributeError: module 'gmst.hmm' has no attribute 'hmm_model'`.
-- [ ] **Step 3: Implement** the Task 12 functions.
-- [ ] **Step 4: Run to verify they pass** — `uv run pytest tests/test_hmm.py -q` → `32 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/hmm.py tests/test_hmm.py
-git commit -m "feat: MC peak risk with masked-e0 draw, analytic phi=0 risk, B2/B3/B4 factory with inner early stopping + refit, re diagnostic"
-```
+Acceptance: fixed-seed MC repeats, 96-slot path and monotone risk schemas hold; outer-label perturbation leaves fit state and first-day issued prediction unchanged; NLL appears only in evaluation output; cut K4 is not_run.
 
 ---
 
-### Task 13: P0-4 leakage test (post-origin perturbation) for every model
+### Task 13: Leakage and seal regression
 
-**Files:**
-- Create: `tests/test_leakage.py` (tests only; fix any model code it exposes in the module that leaks, and list those fixes in the commit message)
+Files: tests/test_leakage.py.
 
-**Interfaces:**
-- Consumes: `bl.b0_model`, `bl.b0p_model`, `bb.bb_model`, `bl.b1_model`, `hmm.hmm_model`, `ev.thresholds`, `ev.calibrate_oof`, `ft.*`.
+For B0/B0p/BB/B1/B2/B3/B4 and SCENARIO, fit with fold j train, perturb j outer labels and future forbidden X, and assert unchanged j selected settings, fit parameters, calibrator, p*, and first outer day 00:00 prediction. Later outer days may legitimately use prior observed outer days, so do not assert all days invariant. Test A+ against same-day production/weather perturbations, B against future production perturbations, and AWstar against same-day weather as an oracle ablation. Repeat with H/IO/KAN when added. Test default loader keeps September Y/X NaN and that no test or smoke path calls real unseal.
 
-**What it proves (v2 §15.7-1, FR-33, US-011):** at origin `d0 = 2021-08-18` (first f4 validation day), predictions of B0, B0′, BB, B1, B2, B3, B4 are bitwise identical when `Y[d0:]`, weather `X[d0:]` and production `X[d0:]` (A+ does not allow same-day production or weather) are replaced by random numbers. SCENARIO (B4 + protocol B) is identical when production from `d0+1` and everything else after the origin change, and **differs** when production of `d0` changes. B1 with `A+W*` differs when weather of `d0` changes. Fits (thresholds, backbone profiles, B1, HMM with inner early stopping) are identical when every value after the fold's last train day changes. Calibration of fold j ignores fold j labels. The default panel is sealed.
-
-- [ ] **Step 1: Write the test** — create `tests/test_leakage.py`:
-
-```python
-from datetime import date
-
-import numpy as np
-import polars as pl
-import pytest
-import torch
-
-from gmst import backbone as bb
-from gmst import baselines as bl
-from gmst import evaluate as ev
-from gmst import features as ft
-from gmst import hmm
-
-D0 = date(2021, 8, 18)
-WX = ("기온", "풍속", "습도", "강수량_증분")
-HMM_KW = dict(tau=10.0, half_life=60, max_epochs=3, N=100, device="cpu")
-MAIN = {
-    "B0": lambda: bl.b0_model(),
-    "B0p": lambda: bl.b0p_model(),
-    "BB": lambda: bb.bb_model(10.0, 60),
-    "B1": lambda: bl.b1_model(10.0, 60, rounds=20),
-    "B2": lambda: hmm.hmm_model("B2", **HMM_KW),
-    "B3": lambda: hmm.hmm_model("B3", **HMM_KW),
-    "B4": lambda: hmm.hmm_model("B4", **HMM_KW),
-}
-
-
-@pytest.fixture(scope="module")
-def panel():
-    return ft.load_panel()
-
-
-def perturb(panel, y_from, wx_from, prod_from, seed=1):
-    rng = np.random.default_rng(seed)
-    p = {**panel, "Y": panel["Y"].copy(), "X": {k: v.copy() for k, v in panel["X"].items()}}
-    p["Y"][y_from:] = rng.uniform(0, 250, p["Y"][y_from:].shape)
-    for k in WX:
-        p["X"][k][wx_from:] = rng.uniform(0, 40, p["X"][k][wx_from:].shape)
-    p["X"]["생산량"][prod_from:] = rng.uniform(0, 3000, p["X"]["생산량"][prod_from:].shape)
-    return p
-
-
-def same(a, b):
-    for k in ("y_mean", "y_median", "q", "paths", "risk_raw"):
-        x, y = a.get(k), b.get(k)
-        assert (x is None) == (y is None), k
-        if x is not None:
-            assert np.array_equal(np.asarray(x), np.asarray(y)), k
-    assert a["M_hat_median"] == b["M_hat_median"] and a["M_hat_mean"] == b["M_hat_mean"]
-    assert a["peak_time_mode"] == b["peak_time_mode"]
-
-
-@pytest.fixture(scope="module")
-def fitted(panel):
-    C, _ = ev.thresholds(panel, ft.role_idx(panel, "f4", "train"))
-    models = {k: f() for k, f in MAIN.items()}
-    models["SCN"] = hmm.hmm_model("B4", protocol="B", train_from=date(2021, 7, 1), **HMM_KW)
-    return {k: (m, m["fit"](panel, "f4", C)) for k, m in models.items()}
-
-
-@pytest.mark.parametrize("name", list(MAIN))
-def test_main_track_ignores_post_origin_values(panel, fitted, name):
-    model, state = fitted[name]
-    d = panel["dates"].index(D0)
-    same(model["predict"](state, panel, d), model["predict"](state, perturb(panel, d, d, d), d))
-
-
-def test_scenario_track_uses_only_same_day_production(panel, fitted):
-    model, state = fitted["SCN"]
-    d = panel["dates"].index(D0)
-    base = model["predict"](state, panel, d)
-    same(base, model["predict"](state, perturb(panel, d, d, d + 1), d))
-    p = {**panel, "X": {k: v.copy() for k, v in panel["X"].items()}}
-    p["X"]["생산량"][d] = p["X"]["생산량"][d][::-1] * 3 + 500.0
-    assert not np.array_equal(base["paths"], model["predict"](state, p, d)["paths"])
-
-
-def test_awstar_uses_same_day_weather_only(panel):
-    C, _ = ev.thresholds(panel, ft.role_idx(panel, "f4", "train"))
-    m = bl.b1_model(10.0, 60, protocol="A+W*")
-    st = m["fit"](panel, "f4", C)
-    d = panel["dates"].index(D0)
-    base = m["predict"](st, panel, d)
-    same(base, m["predict"](st, perturb(panel, d, d + 1, d), d))
-    p = {**panel, "X": {k: v.copy() for k, v in panel["X"].items()}}
-    for k in WX:
-        p["X"][k][d] = p["X"][k][d] + 25.0
-    assert not np.array_equal(base["y_mean"], m["predict"](st, p, d)["y_mean"])
-
-
-def test_fits_ignore_values_after_train_end(panel):
-    tr = ft.role_idx(panel, "f4", "train")
-    after = int(tr.max()) + 1                               # the gap day 08-17 onward
-    p2 = perturb(panel, after, after, after)
-    C1, _ = ev.thresholds(panel, tr)
-    assert np.array_equal(C1, ev.thresholds(p2, tr)[0])
-    a, _ = bb.fit_backbone(panel["Y"], panel["op"], panel["dtype"], tr, 10.0, 60)
-    b, _ = bb.fit_backbone(p2["Y"], p2["op"], p2["dtype"], tr, 10.0, 60)
-    assert np.array_equal(a, b)
-    d = panel["dates"].index(date(2021, 8, 10))
-    for make in (lambda: bl.b1_model(10.0, 60, rounds=20), lambda: hmm.hmm_model("B4", **HMM_KW)):
-        m = make()
-        s1, s2 = m["fit"](panel, "f4", C1), m["fit"](p2, "f4", C1)
-        same(m["predict"](s1, panel, d), m["predict"](s2, panel, d))
-        if isinstance(s1.get("model"), torch.nn.Module):
-            assert all(torch.equal(x, y) for x, y in zip(s1["model"].state_dict().values(),
-                                                         s2["model"].state_dict().values()))
-
-
-def test_calibration_ignores_own_fold_labels():
-    rng = np.random.default_rng(0)
-    raw = rng.random(160)
-    evt = (rng.random(160) < raw).astype(float)
-    folds = np.repeat(["f1", "f2", "f3", "f4"], 40)
-    mk = lambda e: pl.DataFrame({"fold": folds, "variant": ["main"] * 160, "model": ["M"] * 160,
-                                 "usable_peak": [True] * 160,
-                                 **{f"risk_raw_C{c}": raw for c in (50, 75, 90)},
-                                 **{f"risk_{m}_C{c}": np.full(160, np.nan) for m in ("platt", "iso") for c in (50, 75, 90)},
-                                 **{f"event_C{c}": e for c in (50, 75, 90)}})
-    flipped = evt.copy()
-    flipped[folds == "f3"] = 1 - flipped[folds == "f3"]
-    a, _ = ev.calibrate_oof(mk(evt), "platt")
-    b, _ = ev.calibrate_oof(mk(flipped), "platt")
-    f3 = lambda d: d.filter(pl.col("fold") == "f3")["risk_platt_C75"].to_numpy()
-    assert np.array_equal(f3(a), f3(b))
-
-
-def test_sealed_by_default(panel):
-    t = ft.role_idx(panel, "test", "test")
-    assert np.isnan(panel["Y"][t]).all() and all(np.isnan(v[t]).all() for v in panel["X"].values())
-```
-
-- [ ] **Step 2: Run it** — `uv run pytest tests/test_leakage.py -q`. Expected: `12 passed`. Any failure is a leak in the model it names: fix the model module (not the test) until it passes; rerun Tasks 6–12 tests.
-- [ ] **Step 3: Full suite (GPU and CPU)** — `uv run pytest -q` and `CUDA_VISIBLE_DEVICES="" uv run pytest -q`.
-- [ ] **Step 4: Commit**
-```bash
-git add tests/test_leakage.py
-git commit -m "test: P0-4 leakage test (post-origin perturbation, fit invariance, calibration, seal) for B0..B4 and SCENARIO"
-```
-(also `git add` any model module fixed in Step 2).
+Acceptance: synthetic calibration rows from a later fold do not affect an earlier fold's calibrated probabilities; selected H uses only H train-period reference. Run CPU and available GPU checks.
 
 ---
 
-### Task 14: P1-3 three-seed state stability and the transition table
+### Task 14: Three-seed state stability and transition table
 
-**Files:**
-- Modify: `gmst/hmm.py` (append)
-- Create: `tests/test_state_stability.py`
+Files: gmst/hmm.py and tests/test_state_stability.py.
 
-**Interfaces:**
-- Produces (module `gmst.hmm`):
-  - `transition_table(model, panel, day_idx, protocol="A+") -> pl.DataFrame` — columns `op, daytype, hour, from_state, p_to_high`; one row per (op, dtype) cell present among `day_idx` (op = `cal_flags` op, sorted), hour 0–23, from_state 1…K; `p_to_high` = mean over the hour's 4 slots of `A_t(from_state, K)` with `z` built for that cell (`hol = 0`; protocol B production features 0); `daytype` as `wk/sat/sun` (FR-93, v2 §13.4).
-  - `conclusion(table, K) -> tuple[int, str, int]` — the `(op, daytype, hour)` row with the largest `p_to_high` among rows with `from_state == K − 1` (entry into the high state; first in table order on ties) (**[plan pin]** of "§13.4 결론").
-  - `state_summary(model, panel, train_idx, eval_idx, m, protocol="A+") -> dict` — `delta` ((K, 2) numpy), `occ` ((K,) mean smoothed occupancy over observed target steps of the train blocks), `conclusion` (from `transition_table` over `train_idx`), `eval_states` (1-based smoothed argmax on observed slots of `eval_idx` days, concatenated in day order).
-  - `stability_rows(summaries: dict[int, dict]) -> list[dict]` — for each seed pair `(a, b)` in insertion order: `seed_a, seed_b, occ_maxdiff, delta_maxdiff, same_order` (δ strictly increasing in k for both op columns in both seeds), `same_conclusion`, `agreement` (share of equal `eval_states`).
-  - `state_stability(panel, fold="f1", seeds=(0, 1, 2), m=None, tau=10.0, half_life=60, protocol="A+", **train_kw) -> dict` — `tr = role_idx(panel, fold, "train")`, `inn = inner_idx ∩ tr`; `m_full`/`m_in` = `m` if given else `fold_backbone` on `tr` / `tr \ inn`; per seed `fit_with_inner(..., seed=seed, **train_kw)` (the same R10 procedure as B4) and `state_summary(model, panel, tr, role_idx(panel, fold, "val"), m_full, protocol)`. Returns `{"rows": stability_rows(...), "per_seed": {seed: summary}, "ok": all(occ_maxdiff < 0.05 and delta_maxdiff < 5 and same_order and same_conclusion), "collapsed": any(min(occ) < 0.02)}` (v2 §15.7-2, A31). The real-data verdict is **reported** (`results/state_stability.csv`, "seed 의존" when not ok) — it is not a pass/fail gate; the gate is the synthetic test below. If `collapsed`, Task 20 reruns with `--occ-floor`.
-
-- [ ] **Step 1: Write the failing test** — create `tests/test_state_stability.py`:
-
-```python
-from datetime import date, timedelta
-
-import numpy as np
-import polars as pl
-
-from gmst import features as ft
-from gmst import hmm
-
-
-def synthetic_panel(n=40, seed=0):
-    rng = np.random.default_rng(seed)
-    level = np.r_[np.full(32, -20.0), np.zeros(32), np.full(32, 20.0)]   # low 00-08h, normal 08-16h, high 16-24h
-    dates = [date(2021, 3, 1) + timedelta(days=i) for i in range(n)]
-    roles = ["train"] * (n - 8) + ["gap"] + ["val"] * 7
-    return {"dates": dates, "Y": level + rng.normal(0, 2, (n, 96)),
-            "X": {k: np.zeros((n, 96)) for k in ("생산량", "기온", "풍속", "습도", "강수량_증분")},
-            "is_missing": np.zeros((n, 96), bool), "op": np.ones(n, np.int8), "hol": np.zeros(n, np.int8),
-            "dtype": np.zeros(n, np.int8), "dow": np.zeros(n, np.int8), "month": np.full(n, 3, np.int8),
-            "days": pl.DataFrame({"date": dates, "f1": roles})}
-
-
-def test_transition_table_schema():
-    p = synthetic_panel()
-    t = hmm.transition_table(hmm.CondHMM(K=3, dz=14, seed=0), p, np.arange(40))
-    assert t.columns == ["op", "daytype", "hour", "from_state", "p_to_high"]
-    assert t.height == 24 * 3 and set(t["daytype"].unique()) == {"wk"}
-    assert ((t["p_to_high"] >= 0) & (t["p_to_high"] <= 1)).all()
-
-
-def test_stability_rows_arithmetic():
-    s = {0: {"delta": np.array([[-2.0, -20.0], [0.0, 0.0], [2.0, 20.0]]), "occ": np.array([0.3, 0.4, 0.3]),
-             "conclusion": (1, "wk", 16), "eval_states": np.array([1, 2, 3, 3])},
-         1: {"delta": np.array([[-2.0, -21.0], [0.0, 1.0], [2.0, 20.5]]), "occ": np.array([0.32, 0.4, 0.28]),
-             "conclusion": (1, "wk", 16), "eval_states": np.array([1, 2, 2, 3])}}
-    (r,) = hmm.stability_rows(s)
-    assert (r["seed_a"], r["seed_b"]) == (0, 1)
-    assert abs(r["occ_maxdiff"] - 0.02) < 1e-12
-    assert abs(r["delta_maxdiff"] - 1.0) < 1e-12 and r["same_order"] and r["same_conclusion"]
-    assert r["agreement"] == 0.75
-
-
-def test_synthetic_three_states_are_seed_stable():
-    p = synthetic_panel()
-    out = hmm.state_stability(p, fold="f1", seeds=(0, 1, 2), m=np.zeros((40, 96)), max_epochs=200, device="cpu")
-    assert [(r["seed_a"], r["seed_b"]) for r in out["rows"]] == [(0, 1), (0, 2), (1, 2)]
-    for r in out["rows"]:
-        assert r["same_order"] and r["same_conclusion"]
-        assert r["occ_maxdiff"] < 0.05 and r["delta_maxdiff"] < 5 and r["agreement"] > 0.95
-    assert all(s["conclusion"] == (1, "wk", 16) for s in out["per_seed"].values())
-    assert out["ok"] is True and out["collapsed"] is False
-
-
-def test_real_f1_report_structure():
-    p = ft.load_panel()
-    out = hmm.state_stability(p, fold="f1", seeds=(0, 1, 2), max_epochs=3, device="cpu")
-    assert [(r["seed_a"], r["seed_b"]) for r in out["rows"]] == [(0, 1), (0, 2), (1, 2)]
-    for r in out["rows"]:
-        assert r["same_order"] is True and 0 <= r["agreement"] <= 1
-        assert np.isfinite(r["occ_maxdiff"]) and np.isfinite(r["delta_maxdiff"])
-    assert out["ok"] == all(r["occ_maxdiff"] < 0.05 and r["delta_maxdiff"] < 5 and r["same_conclusion"]
-                            for r in out["rows"])
-    assert isinstance(out["collapsed"], bool)
-```
-
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_state_stability.py -q` → `AttributeError: module 'gmst.hmm' has no attribute 'transition_table'`.
-- [ ] **Step 3: Implement** the Task 14 functions.
-- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_state_stability.py -q` → `4 passed` (the synthetic gate trains 3 seeds × 2 fits; expect well under 2 minutes on CPU).
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/hmm.py tests/test_state_stability.py
-git commit -m "feat: transition table, 3-seed state stability (synthetic gate + real-data report)"
-```
+Keep state_summary, stability_rows, transition_table and state_stability(panel,fold="f1",seeds=(0,1,2),...). Each seed repeats that fold's internal_split selection/fit/calibration procedure without outer labels in fit. Report state order, occupancy, δ and prediction agreement; real-data instability is a reported finding, while synthetic ordering checks are tests. Transition table uses the fixed trained model. If occupancy collapse is observed, the runner may rerun development with --occ-floor before final selection. Acceptance: outer-label perturbation changes neither state fit nor three-seed summaries that depend on train; synthetic known-order states pass.
 
 ---
 
@@ -2236,11 +1200,7 @@ def test_no_data_tariff():
 - [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_scenario.py -q` → `ModuleNotFoundError: No module named 'gmst.scenario'`.
 - [ ] **Step 3: Implement** the tariff part of `gmst/scenario.py`.
 - [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_scenario.py -q` → `22 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/scenario.py tests/test_scenario.py
-git commit -m "feat: KEPCO industrial(eul) 2021 TOU tariff, Sunday/holiday/Saturday metering, ratchet floor 222"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
@@ -2351,262 +1311,29 @@ def test_run_scenarios_small():
 - [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_scenario.py -q` → `AttributeError: module 'gmst.scenario' has no attribute 'shift_peak'`.
 - [ ] **Step 3: Implement** the Task 16 functions.
 - [ ] **Step 4: Run to verify they pass** — `uv run pytest tests/test_scenario.py -q` → `29 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/scenario.py tests/test_scenario.py
-git commit -m "feat: SCENARIO what-ifs (4 transforms x 3 rates, common random numbers), daily J_d components, monthly ratchet/energy KRW with kWh change"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
-### Task 17: Error analysis, FN/FP conditions, augmentation-leakage gap, transition table file
+### Task 17: Error analysis and leakage gap
 
-**Files:**
-- Create: `gmst/analysis.py`, `tests/test_analysis.py`
+Files: gmst/analysis.py and tests/test_analysis.py.
 
-**Interfaces:**
-- Consumes: `evaluate` (OOF frames, `FOLDS_CV`), `features`, `backbone.asof_matrix`, `baselines.LGB_PARAMS`, `hmm.transition_table`.
-- Produces (module `gmst.analysis`):
-  - `bin_edges(panel) -> dict[str, np.ndarray]` — `"prod"`: quartiles (25/50/75 %) of the positive finite `X["생산량"]` values on days ≤ 2021-08-31; `"temp"`: quartiles of finite `X["기온"]` on days ≤ 2021-08-31 (design statistics ≤ 08-31, DC10).
-  - `prod_bin(x, edges) -> list[str]` — NaN → `"nan"`, 0 → `"0"`, else `f"Q{np.searchsorted(edges, x, side='right') + 1}"`; `quart_bin(x, edges) -> list[str]` — NaN → `"nan"`, else `Q1…Q4` the same way.
-  - `error_by_condition(slots, panel, models, edges=None) -> pl.DataFrame` — columns `model, condition, bin, n, mae, rmse` over rows with finite `y_true` (variant `main`) for each model in `models`. Conditions: `prod_bin` (slot production), `op` (`op`/`nonop`), `daytype`, `hour` (0–23 as strings), `temp_bin`, `boundary` (`after_off` if `op[d−1] == 0`, else `before_off` if `op[d+1] == 0`, else `other`), and when the model has states: `state_filt`, `state_smooth` (bins `"1".."K"`), `transition` (`switch` if the slot's smoothed state differs from the next slot's within the day, else `stable`). MAE with `y_median`, RMSE with `y_mean` (FR-90, v2 §13.1–§13.3).
-  - `classify(alarm, event) -> list[str]` — `TP/FP/FN/TN`.
-  - `fn_fp(days, panel, p_star) -> tuple[pl.DataFrame, pl.DataFrame]` — rows = `usable_peak` rows of CV folds, variant `main`, per model present, per threshold `C50/C75/C90`, per `p_star_kind ∈ {"p05", "pstar"}`: alarm = `risk_platt ≥ 0.5` or `≥ p_star[(model, "main", fold)][C]`. Table columns `model, C, p_star_kind, date, kind, daytype, op_prev, op_next, prev_day_max, temp_mean, prod_sum, risk_cal, M_true` (`prev_day_max` = nanmax `Y[d−1]`, `temp_mean` = mean `기온[d]`, `prod_sum` = `sum(생산량[d]) / 4`). Summary columns `model, C, p_star_kind, group, stat, value, n` with `group ∈ {FN, FP, all}` and stats `share_wk, share_sat, share_sun, share_op_prev0, share_op_next0, mean_prev_day_max, mean_temp, mean_prod_sum` (`n` = group size) (FR-91, v2 §13.4). The representative threshold is C90, reported on pooled f1–f4 (13 events).
-  - `gap_scores(X, y, day, event, n_random=5, seed=0, rounds=100, max_events=None) -> dict` — LightGBM L2 (`{**LGB_PARAMS, "objective": "regression"}`): `random5` = day-level random 5-fold (fold of each unique day = its position in `np.random.default_rng(seed).permutation(unique days)` mod 5) MAE over all rows; `loeo` = leave-one-event-out MAE over the rows of the events used (sorted event ids, first `max_events` if given); returns `{"random5", "loeo", "n", "n_events"}`. Marker: `# ponytail: 누수 격차는 L2 한 모델로만 측정, 분위수·일모델 격차가 필요하면 확장 (FR-92)`.
-  - `leakage_gap(tau, half_life, rounds=100, max_events=None) -> pl.DataFrame` — columns `scheme, mae, n, n_folds`; rows `random5` then `loeo`; data = `load_panel(include_copies=True)` (sealed) days ≤ 2021-08-31 with ≥ 1 finite Y; features = `lgbm_rows(..., "A+", asof_matrix(...))`; events = `days.event_id` (FR-92, v2 §15.3).
-  - `transitions(state, panel, fold) -> pl.DataFrame` = `hmm.transition_table(state["model"], panel, role_idx(panel, fold, "train"), state["protocol"])` (FR-93).
+error_by_condition(slots,panel,models,variants=None,edges=None) and fn_fp(days,panel,p_star,models=None,variants=None) select explicit (model,variant) pairs. Default may be main for a standalone call, but the runner passes the submitted pair, B4/main and B1/main; do not filter the selected variant back to main. Both outputs retain model and variant columns, and p* lookup uses the row's actual variant. Display ID uses the runner's existing MODEL_ID mapping. Keep existing bins, conditions, same-slot leakage gap and transition table behavior.
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_analysis.py`:
-
-```python
-import numpy as np
-import polars as pl
-import pytest
-
-from gmst import analysis as an
-from gmst import baselines as bl
-from gmst import evaluate as ev
-from gmst import features as ft
-from gmst import hmm
-
-
-@pytest.fixture(scope="module")
-def panel():
-    return ft.load_panel()
-
-
-def test_classify():
-    assert an.classify(np.array([1, 1, 0, 0], bool), np.array([1, 0, 1, 0], bool)) == ["TP", "FP", "FN", "TN"]
-
-
-def test_bins():
-    assert an.prod_bin(np.array([0.0, 5.0, 10.0, 25.0, 99.0, np.nan]), np.array([10.0, 20.0, 30.0])) == [
-        "0", "Q1", "Q2", "Q3", "Q4", "nan"]
-    assert an.quart_bin(np.array([-5.0, 0.0, 15.0, 30.0]), np.array([0.0, 10.0, 20.0])) == ["Q1", "Q2", "Q3", "Q4"]
-
-
-def test_bin_edges_use_design_range(panel):
-    e = an.bin_edges(panel)
-    assert e["prod"].shape == (3,) and e["temp"].shape == (3,) and (np.diff(e["prod"]) >= 0).all()
-    p2 = {**panel, "X": {k: v.copy() for k, v in panel["X"].items()}}
-    late = [i for i, d in enumerate(panel["dates"]) if d.month == 9]
-    p2["X"]["기온"][late] = 99.0
-    assert np.array_equal(an.bin_edges(p2)["temp"], e["temp"])
-
-
-def test_error_by_condition_small(panel):
-    slots = ev.rolling_origin(bl.b0p_model(), panel, folds=("f1",))[0]
-    t = an.error_by_condition(slots, panel, ["B0p"])
-    assert t.columns == ["model", "condition", "bin", "n", "mae", "rmse"]
-    assert {"prod_bin", "op", "daytype", "hour", "temp_bin", "boundary"} <= set(t["condition"].unique())
-    assert t.filter(pl.col("condition") == "hour")["n"].sum() == 1152
-    assert set(t.filter(pl.col("condition") == "boundary")["bin"].unique()) <= {"after_off", "before_off", "other"}
-
-
-def test_fn_fp_small(panel):
-    days = ev.rolling_origin(bl.b0p_model(), panel, folds=("f1",))[1]
-    days = days.with_columns([pl.col(f"risk_raw_C{c}").alias(f"risk_platt_C{c}") for c in (50, 75, 90)])
-    tbl, summ = an.fn_fp(days, panel, {("B0p", "main", "f1"): {"C50": 0.5, "C75": 0.5, "C90": 0.5}})
-    assert tbl.columns == ["model", "C", "p_star_kind", "date", "kind", "daytype", "op_prev", "op_next",
-                           "prev_day_max", "temp_mean", "prod_sum", "risk_cal", "M_true"]
-    assert tbl.height == 12 * 3 * 2 and set(tbl["kind"].unique()) <= {"TP", "FN", "FP", "TN"}
-    assert summ.columns == ["model", "C", "p_star_kind", "group", "stat", "value", "n"]
-
-
-def test_gap_scores_detects_duplicate_leakage():
-    rng = np.random.default_rng(0)
-    rows, ys, days, events = [], [], [], []
-    for e in range(30):
-        z, u = rng.normal(size=3), rng.normal(0, 3.0)
-        for c in range(3):
-            for q in range(24):
-                rows.append([q, *z])
-                ys.append(np.sin(q / 4) + u)
-                days.append(e * 3 + c)
-                events.append(e)
-    out = an.gap_scores(np.array(rows), np.array(ys), np.array(days), np.array(events), rounds=100)
-    assert out["random5"] < 0.8 * out["loeo"] and out["n_events"] == 30
-
-
-def test_transitions_wrapper(panel):
-    tr = ft.role_idx(panel, "f4", "train")
-    t = an.transitions({"model": hmm.CondHMM(K=3, dz=14, seed=0), "protocol": "A+"}, panel, "f4")
-    cells = {(int(panel["op"][i]), int(panel["dtype"][i])) for i in tr}
-    assert t.columns == ["op", "daytype", "hour", "from_state", "p_to_high"] and t.height == len(cells) * 24 * 3
-```
-
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_analysis.py -q` → `ModuleNotFoundError: No module named 'gmst.analysis'`.
-- [ ] **Step 3: Implement** `gmst/analysis.py`.
-- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_analysis.py -q` → `7 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/analysis.py tests/test_analysis.py
-git commit -m "feat: error-by-condition, FN/FP condition tables, augmentation leakage gap (random 5-fold vs LOEO), transition table"
-```
+Acceptance: synthetic H selection produces H rows in error_by_condition and FN/FP, with H p* values, while B1/main comparison remains present. Perturb post-origin data to confirm issued predictions do not change.
 
 ---
 
-### Task 18: One-command runner (stages ①–⑭), improvement-loop driver, smoke mode, sealed final stage, submission files
+### Task 18: Runner, smoke pseudo-test, selection and submission
 
-**Files:**
-- Create: `gmst/run_all.py`, `tests/test_run_all.py`
+Files: gmst/run_all.py and tests/test_run_all.py.
 
-**Interfaces:**
-- Consumes: every module above.
-- Produces (module `gmst.run_all`):
-  - `FULL = {"folds": ("f1", "f2", "f3", "f4"), "max_epochs": 300, "patience": 20, "N": 2000, "B": 2000, "rounds": 100, "loeo_max_events": None, "scen_max_days": None}`; `SMOKE = {"folds": ("f4",), "max_epochs": 2, "patience": 20, "N": 50, "B": 20, "rounds": 10, "loeo_max_events": 5, "scen_max_days": 2}` (FR-99).
-  - `PRED_COLS = ["datetime", "track", "model", "y_mean", "y_median", *QCOLS, "M_hat_median", "M_hat_mean", "peak_time_mode", "risk_C50", "risk_C75", "risk_C90", "C50", "C75", "C90"]` (33, FR-96).
-  - `LADDER = ("H", "IO", "KAN")` — the pre-registered improvement-loop order (US-021, FR-110); `LOOP = ()` — the variants implemented so far (Tasks 21, 22, 23 set it to `("H",)`, `("H", "IO")`, `("H", "IO", "KAN")`); `MODEL_ID = {"main": "B4", "H": "B4-H", "IO": "B4-IO", "KAN": "B4-KAN"}` (FR-96).
-  - `main(argv=None) -> int` with flags `--smoke`, `--no-final` (stop after stage ⑫), `--occ-floor` (turn on the HMM occupancy floor, FR-68), `--package` (Task 19), `--out DIR` (default `RESULTS`). `if __name__ == "__main__": raise SystemExit(main())`.
-  - Every stage prints exactly one line `[NN] <name> <seconds:.1f>s device=<DEVICE.type>` (FR-94). Stage names in order: `preprocess, splits, oof, calibration, metrics, risk_check, bootstrap, loop, selection, state_stability, analysis, scenarios, final, submission`.
+main(argv=None) accepts --smoke, --no-final, --final, --out, --occ-floor, --package. Default and --no-final run development stages through selection/scenarios only. --smoke runs a complete schema exercise using f4 as a pseudo-test on Aug 18–31 with the normal sealed loader and reduced epochs/paths/bootstrap; --final loads and validates an already frozen selection.json, runs only the real September inference/evaluation path, and unseals once; it does not redo OOF selection. Reject --smoke with --final. Keep stage logs and the established result schemas; smoke pseudo files use dates ≤Aug 31 and f4 thresholds, never September values.
 
-**Stages (FR-94 as amended, FR-95, FR-110):**
-1. `preprocess` — `preprocess.run(out)` (writes `data_audit.json`).
-2. `splits` — `splits.run()`.
-3. `oof` — `panel`, `panel_copies`, `panel_suspect` via `load_panel`; `tau, h, table = backbone.select_tau(panel, folds)` → `backbone_tau.csv`; `lag7_skip_table(panel)` → `lag7_skip.csv`; then `rolling_origin` over `folds` for: main `B0, B0p, BB, B1, B2, B3, B4`; `copies` (B1, B4 on `panel_copies`); `suspect` (B1, B4 on `panel_suspect`); `protoA` (B1 and B4 with `protocol="A"`); `K2`, `K4` (B4); `re` (B4 `re=True`, `states=` the B4 main states — no retraining; diagnostic only, FR-75); `AWstar` (B1 `protocol="A+W*"`); `B` (B4 `protocol="B"`, `train_from=date(2021, 7, 1)`, folds = `folds ∩ (f2, f3, f4)`). HMM factories get `tau, half_life, max_epochs, patience, N, occ_floor`; B1 gets `rounds`. Keep the returned states of B4 main and SCENARIO.
-4. `calibration` — `calibrate_oof(days, "platt", inner)` then `"iso"`; `p_star = p_star_table(inner)`; write `oof_slots.csv` (SLOT_COLS), `oof_days.csv` (DAY_COLS), `inner_days.csv` (DAY_COLS) (rewritten after stage 8 so they include the loop variants).
-5. `metrics` — `point_metrics` + `risk_metrics(add_climatology(days, panel), panel, p_star)` + HMM `nll` rows (per fold: `value = state["val_nll"]`, `n` = observed validation points; `pooled` = n-weighted mean) → `metrics.csv` (rewritten after stage 8).
-6. `risk_check` — `risk_check` on models B1–B4 (all their variants) → `risk_check.json` (NaN → null).
-7. `bootstrap` — `compare(B4 main, B1 main, "B4-B1", ("mae", "crps", "brier_mean"), B)` and `compare(B1 AWstar, B1 main, "AWstar-main", ("mae", "brier_mean"), B)` → `bootstrap.csv` (`comparison, metric, delta, ci_lo, ci_hi, dm_stat, dm_p, n_days`).
-8. `loop` — the pre-registered improvement loop (US-021, FR-107–FR-110; v2 §9.6, §15.6, A33–A36). `candidates = {"main": {...}}` for B4 main (`mae` = pooled f1–f4 MAE, `brier_mean` = pooled mean Platt Brier over C50/C75/C90, `gate_met = gate_pass(boot, "B4-B1")`, `gap` = the `B4-B1` mae/brier_mean `[delta, lo, hi]`); `adopted = []` (components of the current best). For `v` in `LADDER`: if any candidate so far has `gate_met` → stop (status of the rest `skipped_gate_met`); elif `v not in LOOP` → status `not_implemented` (the 2026-10-03 stop rule is enforced by not implementing later tasks); else tune its inner-window hyper-parameter on top of `adopted` (IO: `select_io_lambda` → `io_lambda.csv`; KAN: `select_kan` → `kan_grid.csv`), run `rolling_origin` for `hmm_model("B4", …, **flags(adopted + [v]))` as variant `v` (`flags` maps `H` → `emission_source="b1"`, `IO` → `decoder="io", io_lambda=<chosen>`, `KAN` → `kan=True, kan_M=<chosen>, kan_lambda=<chosen>`), calibrate, compare vs B1 as `"<MODEL_ID[v]>-B1"`, add `candidates[v]`; if `select_variant({best, v})` picks `v` (lower MAE, tie Brier) → `adopted.append(v)` ("채택", A34). Append the loop rows to the OOF frames, rewrite `oof_*.csv`, `inner_days.csv`, `metrics.csv`, `risk_check.json`, `bootstrap.csv`.
-9. `selection` — `sel = select_variant(candidates)` (US-021); `final_epochs = hmm.final_epochs([best_epoch of the submitted variant per fold])`. `selection.json` = `{"submitted": MODEL_ID[sel["submitted"]], "submitted_variant", "gate_met", "tried", "criteria": {"mae": [delta, lo, hi], "brier_mean": [...]}, "reported": {"crps": [...]}, "remaining_gap_to_b1", "candidates": [{"variant", "model_id", "components", "status", "mae", "brier_mean", "gate_met"} for main + LADDER in order], "n_candidates_run", "tau", "half_life", "io_lambda" (float or null), "kan": {"M", "lambda_spl"} or null, "final_epochs", "p_star": {model: {variant: {fold: {C50, C75, C90}}}}, "rule": "B1 = benchmark; submit the select_variant winner among gate-passing B4 variants, else the lowest pooled OOF MAE (tie: mean Brier)", "final_protocol": "A+", "final_features": features.SLOT_FEATURES + features.DAY_FEATURES}` (FR-57 as amended, FR-110). `criteria` and `remaining_gap_to_b1` are the submitted variant's `-B1` CIs. B1 is never submitted.
-10. `state_stability` — `hmm.state_stability(panel, "f1", (0, 1, 2), tau=tau, half_life=h, max_epochs, patience, occ_floor, device=DEVICE)` → `state_stability.csv` (`seed_a, seed_b, occ_maxdiff, delta_maxdiff, same_order, same_conclusion, agreement`); if `collapsed`, print `occupancy collapse (<0.02): rerun with --occ-floor`.
-11. `analysis` — `error_by_condition` (the submitted variant, B4 main and the B1 benchmark) → `error_by_condition.csv`; `fn_fp` (same models) → `fn_fp_days.csv`, `fn_fp_summary.csv`; `leakage_gap(tau, h, rounds, loeo_max_events)` → `leakage_gap.csv`; `transitions(B4 main state of the last fold, panel, that fold)` → `hmm_transitions.csv`.
-12. `scenarios` — `run_scenarios(panel, SCENARIO states, N, max_days=scen_max_days)` → `scenarios.csv`, `scenarios_month.csv`. With `--no-final`, return 0 here.
-13. `final` — the only unseal in the package: `panel_open = features.load_panel(unseal=True)`. Models `B0`, `B0p`, `B1` (A+, benchmark only) and the **submitted B4 variant** (A+, its adopted flags, `final_epochs`, `io_lambda`/`kan` if used) — the sealed window is used for this one B4 variant only (FR-94 ⑬); for each: `slots_t, days_t, states_t, inner_t = rolling_origin(model, panel_open, folds=("test",))`; issued predictions `pred[d] = model["predict"](states_t["test"], panel_open, d)` for the 14 test days (96-slot issued values, FR-96); calibrate `days_t` and `inner_t` with `calibrate_oof(..., ref=<main OOF days of the same model/variant>)`; `p_star_test = p_star_table(inner_t)`.
-14. `submission` — `test_predictions.csv` for the submitted variant: 1,344 rows, `PRED_COLS`, `datetime` `%Y.%m.%d %H:%M:%S`, `track = "MAIN"`, `model` = its model ID (`B4`, `B4-H`, `B4-IO` or `B4-KAN`), slot columns from the issued prediction, daily columns repeated over the day's 96 rows (`M_hat_*` issued, `peak_time_mode` as `HH:MM`, `risk_C*` = Platt-calibrated issued `risk_raw` with the ref calibrator then `np.minimum.accumulate`, `C*` = test thresholds (186.5, 198, 210.7)). No `test_predictions_B4_module.csv` (FR-98 deleted). `eval_mask.csv` = `datetime, is_missing` from `panel_open["is_missing"]` (FR-97). `test_metrics.csv` = `point_metrics` + `risk_metrics` of the four final models on fold `test` (B1 kept for comparison). Unless `--smoke`, refresh `ROOT/requirements.txt` with `write_requirements()` (Task 19; skip silently if it returns False).
+At OOF stage select (τ,h) separately for each fold and pass that fold's pair to BB/B1/B2/B3/B4 and ablations. At calibration stage create inner predictions and p* for every (model,variant,fold); after H/IO/KAN additions, recalibrate, rebuild p* and metrics before selecting. Compute outer NLL only in metrics, from a fixed fit state and outer observations. Record K4/isotonic run/not_run flags and calibration counts. selection.json records submitted_model=B4, submitted_variant, submitted ID, selected flags/parameters, final p* and statuses. Pass the exact selected (model,variant) through final ref calibration, p*, error analysis, FN/FP and submission. Final comparator B0/B0p/B1 stays separate.
 
-- [ ] **Step 1: Write the failing test** — create `tests/test_run_all.py`:
-
-```python
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-import numpy as np
-import polars as pl
-import pytest
-
-from gmst import evaluate as ev
-
-ROOT = Path(__file__).resolve().parents[1]
-PRED_COLS = ["datetime", "track", "model", "y_mean", "y_median", *ev.QCOLS, "M_hat_median", "M_hat_mean",
-             "peak_time_mode", "risk_C50", "risk_C75", "risk_C90", "C50", "C75", "C90"]
-FILES = ["data_audit.json", "backbone_tau.csv", "lag7_skip.csv", "oof_slots.csv", "oof_days.csv", "inner_days.csv",
-         "metrics.csv", "risk_check.json", "bootstrap.csv", "selection.json", "state_stability.csv",
-         "error_by_condition.csv", "fn_fp_days.csv", "fn_fp_summary.csv", "leakage_gap.csv", "hmm_transitions.csv",
-         "scenarios.csv", "scenarios_month.csv", "test_predictions.csv", "eval_mask.csv", "test_metrics.csv"]
-STAGES = ["preprocess", "splits", "oof", "calibration", "metrics", "risk_check", "bootstrap", "loop", "selection",
-          "state_stability", "analysis", "scenarios", "final", "submission"]
-
-
-@pytest.fixture(scope="module")
-def smoke(tmp_path_factory):
-    out = tmp_path_factory.mktemp("results")
-    r = subprocess.run([sys.executable, "-m", "gmst.run_all", "--smoke", "--out", str(out)], cwd=ROOT,
-                       capture_output=True, text=True)
-    assert r.returncode == 0, r.stdout[-4000:] + r.stderr[-4000:]
-    return out, r.stdout
-
-
-def read(out, name):
-    return pl.read_csv(out / name, infer_schema_length=None)
-
-
-def test_files_exist(smoke):
-    out, _ = smoke
-    assert not [f for f in FILES if not (out / f).exists()]
-
-
-def test_stage_log_and_seal_order(smoke):
-    _, log = smoke
-    lines = [l for l in log.splitlines() if l.startswith("[")]
-    assert [l.split()[1] for l in lines] == STAGES
-    assert all(l.split()[-1].startswith("device=") for l in lines)
-
-
-def test_oof_and_metric_schemas(smoke):
-    out, _ = smoke
-    assert read(out, "oof_slots.csv").columns == ev.SLOT_COLS
-    assert read(out, "oof_days.csv").columns == ev.DAY_COLS
-    for name in ("metrics.csv", "test_metrics.csv"):
-        assert read(out, name).columns == ["model", "variant", "fold", "stratum", "metric", "value", "n"]
-    assert set(read(out, "test_metrics.csv")["fold"].unique()) == {"test"}
-    assert read(out, "bootstrap.csv").columns == ["comparison", "metric", "delta", "ci_lo", "ci_hi", "dm_stat",
-                                                  "dm_p", "n_days"]
-    variants = set(read(out, "oof_days.csv")["variant"].unique())
-    assert variants >= {"main", "copies", "suspect", "protoA", "K2", "K4", "re", "AWstar", "B"}
-
-
-def test_prediction_file(smoke):
-    out, _ = smoke
-    t = read(out, "test_predictions.csv")
-    sel = json.loads((out / "selection.json").read_text(encoding="utf-8"))
-    assert t.columns == PRED_COLS and t.height == 1344
-    assert t["datetime"][0] == "2021.09.01 00:00:00" and t["datetime"][-1] == "2021.09.14 23:45:00"
-    assert set(t["track"].unique()) == {"MAIN"} and set(t["model"].unique()) == {sel["submitted"]}
-    assert np.allclose(t.select("C50", "C75", "C90").to_numpy(), [186.5, 198.0, 210.7])
-    assert (np.diff(t.select(ev.QCOLS).to_numpy(), axis=1) >= 0).all()
-    r = t.select("risk_C50", "risk_C75", "risk_C90").to_numpy()
-    assert ((r >= 0) & (r <= 1)).all() and (r[:, 0] >= r[:, 1]).all() and (r[:, 1] >= r[:, 2]).all()
-    assert "is_missing" not in t.columns and t["peak_time_mode"].str.contains(r"^\d{2}:\d{2}$").all()
-    assert sel["final_protocol"] == "A+" and not [f for f in sel["final_features"] if f.startswith("ob_")]
-
-
-def test_eval_mask(smoke):
-    out, _ = smoke
-    m = read(out, "eval_mask.csv")
-    assert m.columns == ["datetime", "is_missing"] and m.height == 1344
-    assert m.filter(pl.col("is_missing"))["datetime"].to_list() == ["2021.09.08 12:00:00", "2021.09.08 12:15:00"]
-
-
-def test_selection_is_b4_family(smoke):
-    out, _ = smoke
-    sel = json.loads((out / "selection.json").read_text(encoding="utf-8"))
-    assert sel["submitted"] in ("B4", "B4-H", "B4-IO", "B4-KAN") and sel["submitted_variant"] in ("main", "H", "IO", "KAN")
-    assert {"submitted", "gate_met", "tried", "criteria", "reported", "remaining_gap_to_b1", "candidates",
-            "n_candidates_run", "tau", "half_life", "io_lambda", "kan", "final_epochs", "p_star", "rule",
-            "final_protocol", "final_features"} <= set(sel)
-    assert set(sel["criteria"]) == {"mae", "brier_mean"} and set(sel["reported"]) == {"crps"}
-    assert [c["variant"] for c in sel["candidates"]] == ["main", "H", "IO", "KAN"]
-    assert {c["status"] for c in sel["candidates"]} <= {"run", "skipped_gate_met", "not_implemented"}
-    assert sel["tried"] == [c["variant"] for c in sel["candidates"] if c["status"] == "run"]
-    assert sel["n_candidates_run"] == len(sel["tried"]) and sel["tried"][0] == "main"
-    assert sel["submitted_variant"] in sel["tried"]
-    assert not (out / "test_predictions_B4_module.csv").exists()
-    boot = read(out, "bootstrap.csv")
-    assert {"B4-B1", "AWstar-main", f"{sel['submitted']}-B1"} <= set(boot["comparison"].unique())
-```
-
-- [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_run_all.py -q` → the fixture fails with `No module named gmst.run_all`.
-- [ ] **Step 3: Implement** `gmst/run_all.py`. Keep the stage bodies as plain sequential code in `main` (one function per stage only where a stage is reused); no config files.
-- [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_run_all.py -q` → `6 passed` (one smoke run, a few minutes). Also `uv run pytest tests/test_style.py -q` (the `unseal=True` literal must be in `run_all.py` only).
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/run_all.py tests/test_run_all.py
-git commit -m "feat: one-command runner (14 logged stages incl. improvement-loop driver), smoke mode, sealed final stage, submission files"
-```
+Acceptance: smoke subprocess returns 1,344 pseudo-test rows dated Aug 18–31, no real-unseal call and correct selected variant ID. Synthetic H selection verifies same H OOF calibrator, p*, analysis and submission ID. Default/--no-final emits no real-test predictions. No K4/iso run leaves explicit not_run records with no fabricated score.
 
 ---
 
@@ -2655,453 +1382,51 @@ def test_package():
 - [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_run_all.py -q -k "requirements or package"` → `FileNotFoundError` for `requirements.txt` and a non-zero `--package` exit.
 - [ ] **Step 3: Implement** `write_requirements`, `build_package`, `--package`; update `.gitignore`; generate the file once: `uv run python -c "from gmst.run_all import write_requirements; print(write_requirements())"` → `True`.
 - [ ] **Step 4: Run to verify they pass** — `uv run pytest tests/test_run_all.py -q` → `8 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add gmst/run_all.py tests/test_run_all.py .gitignore requirements.txt
-git commit -m "feat: requirements.txt from uv export with cu126 index line, source package zip"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
-### Task 20: Development run (no unseal) and the B1-benchmark gate check
+### Task 20: Development run and exploratory gate
 
-**Files:** none created; produces `results/` locally (not committed yet) and the gate decision that starts or skips the improvement loop.
-
-**Rules:** no unseal (`--no-final`). The gate (`gate_pass`, US-008) is the success criterion of the B4 family against the B1 benchmark (user decision, A33): ΔMAE and Δmean-Brier (variant − B1, Platt, C50/C75/C90) day-block-bootstrap 95 % CI upper bounds both < 0 on the 54 OOF days. It is read from `results/selection.json` — never from test-window data.
-
-- [ ] **Step 1: Full suite** — `uv run pytest -q` → all passed.
-- [ ] **Step 2: Development run** — `rm -rf results && uv run python -m gmst.run_all --no-final 2>&1 | tee run_dev.log` (≈ 1 h on the A6000; run it in the background and poll). Expected: exit 0, stage lines `[01]`…`[12]`, `results/selection.json` whose `candidates` list shows `main` as `run` and `H`, `IO`, `KAN` as `not_implemented` (or `skipped_gate_met`).
-- [ ] **Step 3: Read the gate** — `uv run python -c "import json; s=json.load(open('results/selection.json')); print(s['gate_met'], s['candidates'], s['remaining_gap_to_b1'])"`.
-  - If `gate_met` is true for `main`: the improvement loop is **not triggered**; Tasks 21–23 are skipped (their candidates stay `skipped_gate_met`, which the report discloses). Go to Task 24.
-  - Otherwise start Task 21 (loop ①). Stop rule for the whole loop (v2 §15.6, A33): stop as soon as a dev run shows `gate_met` for a variant, or when the date passes **2026-10-03**, whichever comes first; then go to Task 24.
-- [ ] **Step 4: Other OOF checks (reported, not gates)**
-  - B1 vs B0′ (success metric): `uv run python -c "import polars as pl; m=pl.read_csv('results/metrics.csv'); print(m.filter((pl.col('fold')=='pooled')&(pl.col('stratum')=='all')&(pl.col('variant')=='main')&(pl.col('metric')=='mae')&pl.col('model').is_in(['B0p','B1'])))"`. If B1 ≥ B0′, the LightGBM ponytail trigger fired: record it for the ledger (Task 26) and report it to the controller. Hyper-parameter search is a PRD non-goal, so do not tune without a user decision.
-  - State collapse: if `run_dev.log` contains `occupancy collapse`, use `--occ-floor` in every later run (FR-68, A21).
-  - `risk_check.json` (B3/B4 discrimination, the `re` diagnostic) and `state_stability.csv` are reported as they are.
-- [ ] **Step 5: Report** the gate result, `remaining_gap_to_b1`, the B1-vs-B0′ line and the collapse flag to the controller (no commit; `results/` is committed in Task 24).
+Run the default runner (or --no-final) with the sealed loader; inspect only pre-September OOF, risk, 53-day bootstrap and selection.json. Compare B4 variants to fixed 100-round B1. If the gate fails, run the registered H→IO→KAN loop only until success or 2026-10-03, reporting attempted count and exploratory-CI caveat. Keep September sealed. Acceptance: all outputs end by Aug 31; selection is a B4 variant; missing p* keys or empty calibration status are visible, not silently filled.
 
 ---
 
-### Task 21: Improvement loop ① — B4-H hybrid centre (variant `H`, model ID `B4-H`)
+### Task 21: Improvement loop ① — B4-H hybrid centre
 
-**Do this task only if Task 20 found the gate not met and the date is ≤ 2026-10-03.** (US-021, FR-107, v2 §9.6 ①, A34.)
+Files: gmst/baselines.py, gmst/hmm.py, gmst/run_all.py and focused tests.
 
-**Files:**
-- Modify: `gmst/baselines.py` (append `b1_centre`), `gmst/hmm.py` (`hmm_model(emission_source=…)`), `gmst/run_all.py` (`LOOP = ("H",)`), `tests/test_hmm.py` (append), `tests/test_leakage.py` (append), `tests/test_run_all.py` (append)
+Implement b1_centre(panel,train_idx,tau,half_life,C,protocol="A+",rounds=100,n_blocks=5) using the existing 19-quantile B1 slot model and its sorted τ=0.5 prediction. On issued days, fit B1 only on that fold's permitted train dates. On HMM training days, use five chronological cross-fit blocks, training each block centre on the other train blocks so its own target labels are absent. This is internal training construction; issued and calibration-day B1 centres remain strictly forward-only. Reuse B1's quantile fit/predict path rather than training a duplicate B1 stack. The variant H uses model B4, variant H and submitted ID B4-H. It has its own full, tune and cal fits, same-variant calibrator, p* and exploratory gate comparison.
 
-**Interfaces:**
-- `baselines.b1_centre(panel, train_idx, tau, half_life, C, protocol="A+", rounds=100, n_blocks=5) -> np.ndarray` (257, 96) — the emission centre `m_t = Ŷ^{B1}_t` = B1's τ = 0.5 slot forecast (`predict_b1(...)["y_median"]`, A32 features unchanged). Every day **not** in `train_idx` gets `predict_b1(fit_b1(panel, train_idx, protocol, (tau, half_life), C, rounds), panel, d)["y_median"]` (the fold-safe forecast the fold's own B1 issues at 00:00). The days of `train_idx` get **cross-fitted** values: `np.array_split(np.sort(train_idx), n_blocks)` contiguous chunks, each chunk's days predicted by `fit_b1` trained on the other chunks. `n_blocks=1` means "no cross-fitting" (one fit on all of `train_idx` predicts every day; used only as the in-sample comparison in the test). Marker: `# ponytail: 학습일 중심은 5개 연속 블록 교차적합, 시간순 확장창이 필요하면 일별 as-of 재적합 (v2 §9.6 ①)` (**[plan pin]**, see Spec issues).
-- `hmm.hmm_model(..., emission_source="backbone", rounds=100)` — `emission_source="b1"` → `m_full = b1_centre(panel, tr, tau, half_life, C, protocol, rounds)` and `m_in = b1_centre(panel, setdiff(tr, inn), …)` replace `fold_backbone`; δ, σ, φ, transitions, masks, the R10 procedure and MC are unchanged (`μ^H_{t,k} = Ŷ^{B1}_t + δ_{k,op}`, FR-107). (**[plan pin]**: the PRD names `emission_source` on the `CondHMM` constructor; `m_t` is data built outside the torch module, so the switch lives in the `hmm_model` factory that builds it.)
-- `run_all.LOOP = ("H",)`; `run_all` builds the variant with `emission_source="b1"`.
-
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_hmm.py`:
-
-```python
-from gmst import baselines as bl
-
-
-def test_b1_centre_equals_predict_b1_on_validation_days():
-    p = ft.load_panel()
-    tr = ft.role_idx(p, "f4", "train")
-    C, _ = ev.thresholds(p, tr)
-    m = bl.b1_centre(p, tr, 10.0, 60, C, rounds=20)
-    b1 = bl.fit_b1(p, tr, "A+", (10.0, 60), C, rounds=20)
-    for d in ft.role_idx(p, "f4", "val")[:3]:
-        assert np.array_equal(m[d], bl.predict_b1(b1, p, int(d))["y_median"])
-
-
-def test_b1_centre_is_cross_fitted_on_train_days():
-    p = ft.load_panel()
-    tr = ft.role_idx(p, "f4", "train")
-    C, _ = ev.thresholds(p, tr)
-    m = bl.b1_centre(p, tr, 10.0, 60, C, rounds=50)
-    full = bl.b1_centre(p, tr, 10.0, 60, C, rounds=50, n_blocks=1)
-    y = p["Y"][tr]
-    f = np.isfinite(y)
-    assert np.isfinite(m[tr]).all()
-    assert np.mean(np.abs(m[tr][f] - y[f])) > np.mean(np.abs(full[tr][f] - y[f]))
-
-
-def test_hybrid_model_uses_b1_centre():
-    p = ft.load_panel()
-    tr = ft.role_idx(p, "f4", "train")
-    C, _ = ev.thresholds(p, tr)
-    model = hmm.hmm_model("B4", emission_source="b1", tau=10.0, half_life=60, rounds=20, max_epochs=2, N=50,
-                          device="cpu")
-    st = model["fit"](p, "f4", C)
-    assert np.array_equal(st["m"], bl.b1_centre(p, tr, 10.0, 60, C, rounds=20))
-    out = model["predict"](st, p, p["dates"].index(date(2021, 8, 18)))
-    assert out["paths"].shape == (50, 96) and np.isfinite(out["y_median"]).all()
-```
-
-Append to `tests/test_leakage.py`:
-
-```python
-def test_b4h_ignores_post_origin_values_and_later_values(panel):
-    C, _ = ev.thresholds(panel, ft.role_idx(panel, "f4", "train"))
-    m = hmm.hmm_model("B4", emission_source="b1", rounds=20, **HMM_KW)
-    st = m["fit"](panel, "f4", C)
-    d = panel["dates"].index(D0)
-    same(m["predict"](st, panel, d), m["predict"](st, perturb(panel, d, d, d), d))
-    tr = ft.role_idx(panel, "f4", "train")
-    after = int(tr.max()) + 1
-    st2 = m["fit"](perturb(panel, after, after, after), "f4", C)
-    assert np.array_equal(st["m"][tr], st2["m"][tr])
-    assert all(torch.equal(x, y) for x, y in zip(st["model"].state_dict().values(), st2["model"].state_dict().values()))
-```
-
-and to `tests/test_run_all.py`:
-
-```python
-def test_loop_registry_has_h():
-    from gmst import run_all
-    assert run_all.LADDER == ("H", "IO", "KAN") and run_all.LOOP[:1] == ("H",)
-    assert run_all.MODEL_ID == {"main": "B4", "H": "B4-H", "IO": "B4-IO", "KAN": "B4-KAN"}
-```
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_hmm.py tests/test_leakage.py tests/test_run_all.py -q` → exactly the 5 new tests fail (`… has no attribute 'b1_centre'`, `unexpected keyword argument 'emission_source'`, `assert () == ('H',)`); all earlier tests pass.
-- [ ] **Step 3: Implement** `b1_centre`, the `emission_source`/`rounds` arguments of `hmm_model`, and `LOOP = ("H",)`.
-- [ ] **Step 4: Run to verify they pass** — the same command → all passed; then `uv run pytest -q` → all passed.
-- [ ] **Step 5: Commit**
-```bash
-git add gmst/baselines.py gmst/hmm.py gmst/run_all.py tests/test_hmm.py tests/test_leakage.py tests/test_run_all.py
-git commit -m "feat: improvement loop 1 - B4-H (B1 fold-safe median as emission centre, cross-fitted on train days)"
-```
-- [ ] **Step 6: Dev run and gate** — `rm -rf results && uv run python -m gmst.run_all --no-final 2>&1 | tee run_dev.log`; read `results/selection.json` (`gate_met`, `candidates`). If a variant met the gate or the date is past 2026-10-03 → go to Task 24; else Task 22.
+Acceptance: issued H centre equals fold-safe B1 median, training centres never use their own labels; issued/calibration centres never use future days, selected H survives through analysis/final/submission. Keep B1 benchmark default at 100 rounds.
 
 ---
 
-### Task 22: Improvement loop ② — B4-IO conditional decoder (variant `IO`, model ID `B4-IO`)
+### Task 22: Improvement loop ② — B4-IO conditional decoder
 
-**Do this task only if the gate is still not met after Task 21 and the date is ≤ 2026-10-03.** (US-021, FR-108, v2 §9.6 ②, A35; ledger "Ruling (B4-IO spec)".) B4-IO replaces the old day-random-effect and state × daytype-variance candidates; the `re` ablation stays a diagnostic only (FR-75).
+Files: gmst/hmm.py, gmst/run_all.py and focused tests.
 
-**Files:**
-- Modify: `gmst/hmm.py`, `gmst/run_all.py` (`LOOP = ("H", "IO")`, `io_lambda.csv`), `tests/test_hmm.py` (append), `tests/test_leakage.py` (append), `tests/test_run_all.py` (append)
+Keep the 13-column u and 3-column v, ordered state means, time-varying σ/φ and the existing IO penalty. select_io_lambda(panel,flags,fold,grid=(0,0.01,0.1,1),...) chooses λ for exactly one fold on its tuning_idx; no pooled f1–f4 scoring. Use fixed λ=0.01 with status=default_empty if that fold has no usable tuning target. The final test fit chooses λ anew from its pre-September train. The runner stores fold,lambda_io,nll_tune,n_tune,status; variant IO receives fold-specific λ and produces calibration inner predictions and p* before gate comparison.
 
-**Interfaces and math (input–output HMM emission; transitions unchanged):**
-- `hmm.U_COLS = ["one", "op", "sin1", "cos1", "sin2", "cos2", "op_sin1", "op_cos1", "sat", "sun", "hol", "ybar_prev", "ymax_prev"]` (13, US-021 order).
-- `hmm.u_features(panel, protocol, m, day_idx) -> np.ndarray` (n, 96, 13) — `u_t = [1, op_d, sin(2πq/96), cos(2πq/96), sin(4πq/96), cos(4πq/96), op_d·sin(2πq/96), op_d·cos(2πq/96), 1[Sat], 1[Sun], hol_d, ybar_{d−1}, ymax_{d−1}]` with `op, hol` from `cal_flags(panel, protocol)`; `ybar_{d−1}` / `ymax_{d−1}` = mean / max of `Y[d−1] − m[d−1]` over day d−1's observed slots; both 0.0 when day d−1 has no observed slot or d = 0 (13 columns always). `hmm.prev_missing_days(panel, day_idx) -> int` counts those zero-filled days; `run_all` prints `ybar_prev_missing_days=<n>` in the `loop` stage (the PRD's audit count).
-- `hmm.v_features(panel, day_idx) -> np.ndarray` (n, 96, 3) = `[1, sin(2πq/96), cos(2πq/96)]`.
-- `CondHMM(..., decoder="const")` — `decoder="io"` replaces `rho, s, psi` by `a` (K, 13), `b` (K, 13), `c` (K, 3): emission parameters `a + b + c` = 87 for K = 3 (transitions unchanged, 90 for A+). Init: `a[k, 0]` / `a[k, 1]` = the op-0 value / (op-1 − op-0) difference of the base `rho` init; `b[k, 0]`, `b[k, 1]` likewise from `s`; `c[k, 0]` = the base `psi` init; all other entries 0; plus the seed-driven N(0, 0.01²) noise.
-- `CondHMM.emission_t(m, opt, u=None, v=None) -> tuple[mu, sig, phi]` (each (…, K)). `decoder="const"`: `mu = m + δ[k, opt]`, `sig = σ[k, opt]`, `phi = phi()` broadcast. `decoder="io"`: `δ_{t,1} = a_1ᵀu_t`, `δ_{t,k} = δ_{t,k−1} + softplus(a_kᵀu_t)`, `mu = m + δ_t`, `sig = 1 + softplus(b_kᵀu_t)`, `phi = sigmoid(c_kᵀv_t)` (FR-108). `forward_logp`, `backward`, `filter_last`, `forecast`, `posthoc_states` switch to `emission_t` with time-varying φ everywhere (pairwise emission `N(y_t; μ_{t,k} + φ_{t,k}(y_{t−1} − μ_{t−1,i}), σ²_{t,k})`, stationary marginal `σ²_{t,k}/(1 − φ²_{t,k})`, MC `e_h = φ_{h,S_h} e_{h−1} + σ_{h,S_h} ε_h`, masked-e0 draw with the parameters of the last slot of day d−1). `forward_logp(model, y, obs, m, opt, z, u=None, v=None)` and `backward(…, u=None, v=None)` gain optional trailing arguments; `make_blocks(..., io=False)` adds `u` (B, 192, 13) and `v` (B, 192, 3) when `io=True`. All Task 11–14 tests keep passing unchanged.
-- `hmm.io_penalty(model) -> Tensor` = `Σ a[:, H]² + Σ b[:, H]²` with `H = [2, 3, 4, 5, 6, 7, 11, 12]` (harmonic and yesterday-summary columns; intercept, `op`, `sat`, `sun`, `hol` and all of `c` are not penalised, US-021). `fit_blocks(..., penalty=None)` adds `penalty(model)` to the loss when given (a callable already multiplied by its λ).
-- `hmm.select_io_lambda(panel, flags, folds, grid=(0.0, 0.01, 0.1, 1.0), **kw) -> tuple[float, pl.DataFrame]` — for each λ and fold: the inner phase of `fit_with_inner` (train on `train \ inner`, early stopping on the inner window) with `flags` (the adopted variants' factory flags) + `decoder="io"`; record its best inner NLL; pool over folds weighted by observed inner slots; return the argmin λ (ties → first) and the table `lambda_io, nll_inner` (→ `results/io_lambda.csv`, US-021). The folds' validation days are never used (R10; **[plan pin]**: inner NLL as the criterion, see Spec issues).
-- `hmm_model(..., decoder="const", io_lambda=0.0)`: `decoder="io"` → `CondHMM(decoder="io")`, IO blocks, penalty `io_lambda · io_penalty`. `run_all`: for the `IO` step, `select_io_lambda` on top of the adopted flags, then run; `LOOP = ("H", "IO")`.
-
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_hmm.py`:
-
-```python
-def test_io_param_count_and_ordering():
-    model = hmm.CondHMM(K=3, dz=14, decoder="io", seed=0).double()
-    assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 90 + 87
-    assert model.a.numel() + model.b.numel() + model.c.numel() == 87
-    g = torch.Generator().manual_seed(3)
-    with torch.no_grad():
-        for prm in model.parameters():
-            prm.add_(torch.randn(prm.shape, generator=g, dtype=prm.dtype))
-    u = torch.randn(200, 13, generator=g, dtype=torch.float64)
-    u[:, 0] = 1.0
-    v = torch.tensor(hmm.v_features(ft.load_panel(), np.array([0, 1, 2]))[..., :].reshape(-1, 3)[:200])
-    mu, sig, phi = model.emission_t(torch.zeros(200, dtype=torch.float64), torch.ones(200, dtype=torch.long), u, v)
-    assert (mu[:, 1:] > mu[:, :-1]).all() and (sig >= 1).all() and ((phi > 0) & (phi < 1)).all()
-
-
-def test_io_nests_b4_likelihood():
-    base = rand_model(K=3, dz=14, seed=4)
-    io = hmm.CondHMM(K=3, dz=14, decoder="io", seed=4).double()
-    with torch.no_grad():
-        io.W.copy_(base.W)
-        for t in (io.a, io.b, io.c):
-            t.zero_()
-        io.a[:, 0] = base.rho[:, 1]
-        io.b[:, 0] = base.s[:, 1]
-        io.c[:, 0] = base.psi
-    blk = {k: (v.double() if v.is_floating_point() else v) for k, v in synthetic_blocks(n=6).items() if k != "days"}
-    g = torch.Generator().manual_seed(9)
-    u = torch.randn(6, 192, 13, generator=g, dtype=torch.float64)
-    u[..., 0], u[..., 1] = 1.0, 1.0                              # op = 1 in synthetic_blocks
-    v = torch.randn(6, 192, 3, generator=g, dtype=torch.float64)
-    v[..., 0] = 1.0
-    a = hmm.forward_logp(base, blk["y"], blk["obs"], blk["m"], blk["opt"], blk["z"])[0]
-    b = hmm.forward_logp(io, blk["y"], blk["obs"], blk["m"], blk["opt"], blk["z"], u, v)[0]
-    assert torch.allclose(a, b, atol=1e-6)
-
-
-def test_u_features_use_only_previous_day():
-    p = ft.load_panel()
-    d = p["dates"].index(date(2021, 8, 18))
-    m = np.full((257, 96), 100.0)
-    u = hmm.u_features(p, "A+", m, np.array([d]))
-    assert u.shape == (1, 96, 13) and hmm.U_COLS[-2:] == ["ybar_prev", "ymax_prev"]
-    assert u[0, 0, 11] == pytest.approx(np.nanmean(p["Y"][d - 1] - 100.0))
-    assert u[0, 0, 12] == pytest.approx(np.nanmax(p["Y"][d - 1] - 100.0))
-    for k in (d, d - 2):
-        p2 = {**p, "Y": p["Y"].copy()}
-        p2["Y"][k] += 50.0
-        assert np.array_equal(hmm.u_features(p2, "A+", m, np.array([d])), u)
-    p3 = {**p, "Y": p["Y"].copy()}
-    p3["Y"][d - 1] += 50.0
-    assert not np.array_equal(hmm.u_features(p3, "A+", m, np.array([d])), u)
-    masked = p["dates"].index(date(2021, 7, 14))                 # d-1 = 07-13 is fully masked
-    assert (hmm.u_features(p, "A+", m, np.array([masked]))[0, :, 11:] == 0).all()
-    assert hmm.prev_missing_days(p, np.array([masked, d])) == 1
-
-
-def test_io_penalty_skips_intercept_op_flags_and_phi():
-    model = hmm.CondHMM(K=3, dz=14, decoder="io", seed=0)
-    with torch.no_grad():
-        for t in (model.a, model.b, model.c):
-            t.zero_()
-        model.a[:, [0, 1, 8, 9, 10]] = 5.0
-        model.c[:] = 5.0
-    assert hmm.io_penalty(model).item() == 0.0
-    with torch.no_grad():
-        model.b[0, 11] = 2.0
-    assert hmm.io_penalty(model).item() == pytest.approx(4.0)
-
-
-def test_select_io_lambda_table():
-    p = ft.load_panel()
-    lam, table = hmm.select_io_lambda(p, {}, folds=("f4",), grid=(0.0, 1.0), tau=10.0, half_life=60, max_epochs=2,
-                                      device="cpu")
-    assert table.columns == ["lambda_io", "nll_inner"] and table.height == 2 and lam in (0.0, 1.0)
-```
-
-Append to `tests/test_leakage.py`:
-
-```python
-def test_b4io_ignores_post_origin_values(panel):
-    C, _ = ev.thresholds(panel, ft.role_idx(panel, "f4", "train"))
-    m = hmm.hmm_model("B4", decoder="io", io_lambda=0.01, **HMM_KW)
-    st = m["fit"](panel, "f4", C)
-    d = panel["dates"].index(D0)
-    same(m["predict"](st, panel, d), m["predict"](st, perturb(panel, d, d, d), d))
-```
-
-and to `tests/test_run_all.py`:
-
-```python
-def test_loop_registry_has_io():
-    from gmst import run_all
-    assert run_all.LOOP[:2] == ("H", "IO")
-```
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_hmm.py tests/test_leakage.py tests/test_run_all.py -q` → exactly the 7 new tests fail (`unexpected keyword argument 'decoder'`, missing `u_features` …); all earlier tests pass.
-- [ ] **Step 3: Implement** the IO decoder, the `emission_t` refactor, the penalty hook, `select_io_lambda`, `prev_missing_days`, `LOOP = ("H", "IO")` and `io_lambda.csv` in `run_all`.
-- [ ] **Step 4: Run to verify they pass** — same command → all passed (Tasks 11–14 and 21 tests unchanged and green); `uv run pytest -q` → all passed.
-- [ ] **Step 5: Commit**
-```bash
-git add gmst/hmm.py gmst/run_all.py tests/test_hmm.py tests/test_leakage.py tests/test_run_all.py
-git commit -m "feat: improvement loop 2 - B4-IO conditional decoder (delta, sigma, phi as functions of u_t, v_t)"
-```
-- [ ] **Step 6: Dev run and gate** — as Task 21 Step 6; if not met and ≤ 2026-10-03 → Task 23, else Task 24.
+Acceptance: changing other folds' labels or this fold's outer labels cannot change its λ or first issued prediction. The IO model and variant survive to the result tables if selected.
 
 ---
 
-### Task 23: Improvement loop ③ — B4-KAN periodic-spline transition (variant `KAN`, model ID `B4-KAN`)
+### Task 23: Improvement loop ③ — B4-KAN periodic-spline transition
 
-**Do this task only if the gate is still not met after Task 22 and the date is ≤ 2026-10-03.** (US-021, FR-109, v2 §9.6 ③, A36.)
+Files: gmst/hmm.py, gmst/run_all.py and focused tests.
 
-**Files:**
-- Modify: `gmst/hmm.py`, `gmst/run_all.py` (`LOOP = ("H", "IO", "KAN")`, `kan_grid.csv`), `tests/test_hmm.py` (append), `tests/test_leakage.py` (append), `tests/test_run_all.py` (append)
+Keep cubic cyclic B-splines with M∈{8,12,16}. z_features(kan=True,M) returns 2M+3 columns: two operating-state spline blocks followed by sat,sun,hol; no separate op column and no transition intercept. For K=3,M=12 this is 162 transition parameters. spline_penalty sums cyclic first differences inside each M block. select_kan(panel,flags,fold,...) chooses M and penalty λ on that fold's tuning_idx only; empty tuning uses (M=12,λ=0.01) with status=default_empty. The final pre-September train chooses its own pair. Record fold,M,lambda_spl,nll_tune,n_tune,status; add KAN inner predictions/p* before gate comparison.
 
-**Interfaces and math:**
-- `hmm.cyclic_bspline(M) -> np.ndarray` (96, M) — `B_m(q) = b3(((q·M/96) − m) mod M)` with the cardinal cubic B-spline `b3(x) = x³/6` (0 ≤ x < 1), `(−3x³ + 12x² − 12x + 4)/6` (1 ≤ x < 2), `(3x³ − 24x² + 60x − 44)/6` (2 ≤ x < 3), `(4 − x)³/6` (3 ≤ x < 4), 0 otherwise. Partition of unity, non-negative, period 96, uniform knots.
-- `z_features(panel, protocol, day_idx, kan=False, M=12)` — `kan=True` (protocol `A+` only, assert) drops the 6 harmonics and the 4 op×harmonic interactions and returns `[(1 − op)·B_1(q) … (1 − op)·B_M(q), op·B_1(q) … op·B_M(q), sat, sun, hol, op]` (2M + 4), i.e. one spline `g(q, op) = Σ_m c_{op,m} B_m(q)` per transition pair and operating state, plus the 4 linear 0/1 flags (FR-109).
-- `CondHMM(..., intercept=True)` — the KAN mode uses `intercept=False` because each op spline already spans a constant (partition of unity); transitions then have `K(K−1)(2M + 4)` parameters (168 for K = 3, M = 12 — the v2 §9.6 count; **[plan pin]**, see Spec issues).
-- `hmm.spline_penalty(model, M) -> Tensor` = `Σ_{i,c} Σ_{block ∈ {0, M}} Σ_{m=0}^{M−1} (W[i, c, block + (m+1) mod M] − W[i, c, block + m])²` (cyclic first differences inside each op block; flags unpenalised).
-- `hmm.select_kan(panel, flags, folds, M_grid=(8, 12, 16), lambda_grid=(0.0, 0.01, 0.1, 1.0), **kw) -> tuple[int, float, pl.DataFrame]` — the `select_io_lambda` procedure over the 3 × 4 grid with `flags` + `kan=True`; table columns `M, lambda_spl, nll_inner` (→ `results/kan_grid.csv`, US-021); ties → first in grid order. If the chosen M is 8 or 16, print `kan grid edge: M=<M>` (A36). (**[plan pin]** of the 4-value λ grid, see Spec issues.)
-- `hmm_model(..., kan=False, kan_M=12, kan_lambda=0.0)`: `kan=True` → `CondHMM(dz=2·kan_M + 4, intercept=False)`, KAN z features, penalty `kan_lambda · spline_penalty` (added to any IO penalty). `run_all`: for the `KAN` step, `select_kan` on top of the adopted flags, then run; `LOOP = ("H", "IO", "KAN")`.
-
-- [ ] **Step 1: Write the failing tests** — append to `tests/test_hmm.py`:
-
-```python
-@pytest.mark.parametrize("M", [8, 12, 16])
-def test_cyclic_bspline(M):
-    B = hmm.cyclic_bspline(M)
-    assert B.shape == (96, M) and (B >= 0).all() and np.allclose(B.sum(1), 1.0)
-    assert B.max() == pytest.approx(2 / 3)
-    assert np.allclose(np.roll(B, 96 // M, axis=0)[:, :-1], B[:, 1:])       # B_m(q - one knot) = B_{m+1}(q)
-
-
-def test_kan_param_count_and_features():
-    model = hmm.CondHMM(K=3, dz=2 * 12 + 4, intercept=False, seed=0)
-    assert sum(p.numel() for p in model.parameters() if p.requires_grad) == 168 + 15
-    p = ft.load_panel()
-    i = p["dates"].index(date(2021, 8, 18))
-    z = hmm.z_features(p, "A+", np.array([i]), kan=True, M=12)
-    assert z.shape == (1, 96, 28)
-    op = int(p["op"][i])
-    assert np.allclose(z[0, :, 12 * op:12 * op + 12], hmm.cyclic_bspline(12))
-    assert np.allclose(z[0, :, 12 * (1 - op):12 * (1 - op) + 12], 0.0) and np.allclose(z[0, :, -1], op)
-
-
-def test_spline_penalty():
-    model = hmm.CondHMM(K=3, dz=2 * 8 + 4, intercept=False, seed=0)
-    with torch.no_grad():
-        model.W.zero_()
-        model.W[..., :16] = 3.0
-        model.W[..., 16:] = 7.0
-    assert hmm.spline_penalty(model, 8).item() == 0.0
-    with torch.no_grad():
-        model.W[0, 0, 0] = 4.0                                   # one knot bumped by 1 -> two unit differences
-    assert hmm.spline_penalty(model, 8).item() == pytest.approx(2.0)
-
-
-def test_select_kan_table():
-    p = ft.load_panel()
-    M, lam, table = hmm.select_kan(p, {}, folds=("f4",), M_grid=(8,), lambda_grid=(0.0, 1.0), tau=10.0,
-                                   half_life=60, max_epochs=2, device="cpu")
-    assert table.columns == ["M", "lambda_spl", "nll_inner"] and table.height == 2 and M == 8
-```
-
-Append to `tests/test_leakage.py`:
-
-```python
-def test_b4kan_ignores_post_origin_values(panel):
-    C, _ = ev.thresholds(panel, ft.role_idx(panel, "f4", "train"))
-    m = hmm.hmm_model("B4", kan=True, kan_M=8, kan_lambda=0.01, **HMM_KW)
-    st = m["fit"](panel, "f4", C)
-    d = panel["dates"].index(D0)
-    same(m["predict"](st, panel, d), m["predict"](st, perturb(panel, d, d, d), d))
-```
-
-and to `tests/test_run_all.py`:
-
-```python
-def test_loop_registry_complete():
-    from gmst import run_all
-    assert run_all.LOOP == ("H", "IO", "KAN")
-```
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/test_hmm.py tests/test_leakage.py tests/test_run_all.py -q` → exactly the 8 new tests fail (`no attribute 'cyclic_bspline'` …); all earlier tests pass.
-- [ ] **Step 3: Implement** the KAN transition mode, the penalty, `select_kan`, `LOOP` and `kan_grid.csv`.
-- [ ] **Step 4: Run to verify they pass** — same command → all passed; `uv run pytest -q` → all passed.
-- [ ] **Step 5: Commit**
-```bash
-git add gmst/hmm.py gmst/run_all.py tests/test_hmm.py tests/test_leakage.py tests/test_run_all.py
-git commit -m "feat: improvement loop 3 - B4-KAN periodic cubic B-spline transition logits with smoothness penalty"
-```
-- [ ] **Step 6: Dev run and gate** — as Task 21 Step 6; the loop ends here in any case → Task 24.
+Acceptance: basis rows sum to one, KAN feature count is 2M+3, no redundant op parameter, fold j outer-label perturbation leaves its choice and first issued prediction unchanged.
 
 ---
 
-### Task 24: The single sealed final run, results tests, determinism
+### Task 24: Single real sealed final run and verification
 
-**Files:**
-- Create: `tests/test_results.py`
-- Create (by running): `results/*` (committed)
+Only after the B4 family/variant, settings and thresholds are fixed in selection.json, invoke python -m gmst.run_all --final once. This is the only real unseal. It evaluates the chosen B4 variant plus B0/B0p/B1 comparison; same-(model,variant) pre-September OOF fits the final calibrator, and final train cal days determine final p*. Save 1,344 September submission rows and evaluation mask. Never reselect from test metrics. If an execution defect forces a rerun, document the bug and exact rerun reason.
 
-**Rules:** this is the only task that runs the final stage for real (the smoke test's final stage writes into a temp dir and is only schema-checked). The final stage evaluates the sealed window once, for the one B4 variant chosen by `select_variant` (plus B0/B0′/B1 for comparison, FR-94 ⑬). Do not open, print or summarise `results/test_metrics.csv` before Step 3 is done, and never change a model, variant or threshold because of it. If a bug fix is needed afterwards, fix it, rerun once, and record the rerun and its reason in the commit message. Target date: 2026-10-04 (report 10-04…10-06, buffer 10-07…10-08).
-
-- [ ] **Step 1: Write the results test** — create `tests/test_results.py` (it skips until the final run exists):
-
-```python
-import json
-
-import polars as pl
-import pytest
-
-from gmst import RESULTS
-from gmst import evaluate as ev
-
-pytestmark = pytest.mark.skipif(not (RESULTS / "selection.json").exists(), reason="final run (Task 24) not done yet")
-MODELS = ("B0", "B0p", "BB", "B1", "B2", "B3", "B4")
-MODEL_ID = {"main": "B4", "H": "B4-H", "IO": "B4-IO", "KAN": "B4-KAN"}
-
-
-def load(name):
-    return pl.read_csv(RESULTS / name, infer_schema_length=None)
-
-
-def sel():
-    return json.loads((RESULTS / "selection.json").read_text(encoding="utf-8"))
-
-
-def test_g3_baselines_reproduced():
-    assert [round(v, 2) for v in load("lag7_skip.csv")["mae"]] == [6.23, 25.77, 65.34, 9.84]
-    m = load("metrics.csv").filter((pl.col("model") == "B0p") & (pl.col("variant") == "main")
-                                   & (pl.col("stratum") == "all") & (pl.col("metric") == "mae")
-                                   & pl.col("fold").is_in(["f1", "f2", "f3", "f4"])).sort("fold")
-    assert [round(v, 2) for v in m["value"]] == [14.85, 10.38, 14.49, 15.17]
-
-
-def test_g4_same_conditions_table():
-    m = load("metrics.csv").filter((pl.col("variant") == "main") & (pl.col("fold") == "pooled")
-                                   & (pl.col("stratum") == "all"))
-    for model in MODELS:
-        assert {"mae", "rmse", "peak_mae", "peak_hit2", "n_events_C90"} <= set(m.filter(pl.col("model") == model)["metric"])
-    for model in ("B1", "B2", "B3", "B4"):
-        assert {"crps", "cov80", "brier_platt_C90", "auc_C90", "bss_cond_C90", "f1_C90_pstar"} <= set(
-            m.filter(pl.col("model") == model)["metric"])
-    assert m.filter(pl.col("metric") == "mae")["n"].n_unique() == 1
-
-
-def test_oof_row_counts():
-    days = load("oof_days.csv")
-    for model in MODELS:
-        assert days.filter((pl.col("model") == model) & (pl.col("variant") == "main")).height == 56
-    for v in ("K2", "K4", "re", "copies", "suspect", "protoA"):
-        assert days.filter((pl.col("model") == "B4") & (pl.col("variant") == v)).height == 56, v
-    for v in sel()["tried"][1:]:
-        assert days.filter((pl.col("model") == "B4") & (pl.col("variant") == v)).height == 56, v
-    assert days.filter((pl.col("model") == "B1") & (pl.col("variant") == "AWstar")).height == 56
-    assert days.filter(pl.col("variant") == "B").height == 42
-    assert load("oof_slots.csv").filter((pl.col("model") == "B4") & (pl.col("variant") == "main")).height == 5376
-
-
-def test_g5_selection_consistent():
-    s, boot = sel(), load("bootstrap.csv")
-    run = {c["variant"]: {"mae": c["mae"], "brier_mean": c["brier_mean"], "gate_met": c["gate_met"], "gap": {}}
-           for c in s["candidates"] if c["status"] == "run"}
-    assert ev.select_variant(run)["submitted"] == s["submitted_variant"]
-    assert s["submitted"] == MODEL_ID[s["submitted_variant"]] and s["submitted"] != "B1"
-    for v, c in run.items():
-        assert ev.gate_pass(boot, MODEL_ID[v] + "-B1") == c["gate_met"]
-    assert {"B4-B1", "AWstar-main"} <= set(boot["comparison"]) and (boot["n_days"] == 54).all()
-    r = boot.filter((pl.col("comparison") == s["submitted"] + "-B1") & (pl.col("metric") == "mae")).row(0, named=True)
-    assert s["criteria"]["mae"] == pytest.approx([r["delta"], r["ci_lo"], r["ci_hi"]])
-
-
-def test_g6_risk_check_recorded():
-    rc = json.loads((RESULTS / "risk_check.json").read_text(encoding="utf-8"))
-    for key in ("B1/main", "B2/main", "B3/main", "B4/main", "B4/re"):
-        assert {"C50", "C75", "C90", "discrimination_missing"} <= set(rc[key])
-        assert rc[key]["C90"]["n_events"] == 13
-
-
-def test_g7_scenarios():
-    d, mo = load("scenarios.csv"), load("scenarios_month.csv")
-    assert d.height == 27 * 13
-    assert set(d["scenario"]) == {"baseline", "shift_peak", "stagger_start", "avoid_high", "ease_peak"}
-    assert mo.height == 2 * 13 and (mo["P_floor"] == 222.0).all()
-    assert (mo.filter(pl.col("scenario") == "baseline")["d_demand_won"] == 0).all()
-
-
-def test_report_support_files():
-    s = load("state_stability.csv")
-    assert s.columns == ["seed_a", "seed_b", "occ_maxdiff", "delta_maxdiff", "same_order", "same_conclusion",
-                         "agreement"] and s.height == 3
-    assert load("leakage_gap.csv")["scheme"].to_list() == ["random5", "loeo"]
-    assert load("hmm_transitions.csv").columns == ["op", "daytype", "hour", "from_state", "p_to_high"]
-    assert load("backbone_tau.csv").height == 15
-
-
-def test_g1_submission_shape():
-    t = load("test_predictions.csv")
-    assert t.height == 1344 and len(t.columns) == 33 and set(t["model"].unique()) == {sel()["submitted"]}
-    assert not (RESULTS / "test_predictions_B4_module.csv").exists()
-```
-
-- [ ] **Step 2: Single final run** — `rm -rf results && uv run python -m gmst.run_all 2>&1 | tee run_final.log` (add `--occ-floor` if Task 20 required it). Expected: exit 0, 14 stage lines, `results/test_predictions.csv` present.
-- [ ] **Step 3: Verify** — `uv run pytest tests/test_results.py -q` → `8 passed`; `uv run pytest -q` → all passed.
-- [ ] **Step 4: Determinism (success metric)** — `uv run python -m gmst.run_all --out results_repro` (same flags), then
-  `uv run python -c "import polars as pl, numpy as np; a=pl.read_csv('results/test_predictions.csv'); b=pl.read_csv('results_repro/test_predictions.csv'); c=[k for k,t in a.schema.items() if t.is_numeric()]; print(np.abs(a.select(c).to_numpy()-b.select(c).to_numpy()).max())"` → prints a value ≤ `1e-6`; then `rm -rf results_repro`.
-- [ ] **Step 5: Commit**
-```bash
-git add tests/test_results.py results
-git commit -m "run: improvement-loop selection + single sealed final run; results committed"
-```
+Before --final, run default/full development checks, smoke pseudo-test twice on Aug 18–31 for same-device ≤1e-6 numerical reproducibility, and synthetic loader-unseal/selected-H integration tests. After --final, validate schema, shape, finite issued fields and chosen model ID without retraining or opening the sealed data again. No second full runner execution for determinism. Final results tests are gated on test_predictions.csv existence, not merely selection.json.
 
 ---
 
@@ -3182,11 +1507,7 @@ def test_03_reads_results():
 - [ ] **Step 2: Run to verify it fails** — `uv run pytest tests/test_notebooks.py -q` → failures (`03_results.ipynb` missing; `01` still writes a CSV).
 - [ ] **Step 3: Implement** the three notebooks per the contract and execute them in place with nbconvert (command above).
 - [ ] **Step 4: Run to verify it passes** — `uv run pytest tests/test_notebooks.py -q` → `6 passed`.
-- [ ] **Step 5: Full suite and commit**
-```bash
-git add notebooks/01_preprocess.ipynb notebooks/02_eda.ipynb notebooks/03_results.ipynb tests/test_notebooks.py
-git commit -m "feat: display-only notebooks (03 results viewer; 01/02 re-pointed to script outputs, design stats <= 08-31)"
-```
+- [ ] **Step 5: Full suite and verify**
 
 ---
 
@@ -3197,7 +1518,7 @@ git commit -m "feat: display-only notebooks (03 results viewer; 01/02 re-pointed
 - Create: `PONYTAIL-DEBT.md` (at `WT` root, i.e. the repository root after merge)
 
 **Contract:**
-- `README.md` (Korean, FR-101, no affiliation/logo, FR-7), sections in order: 개요 (문제정의 H=96 / L=672 / 00:00 발행 / C = fold 학습 가동일 일최대 q50·q75·q90, 테스트 186.5·198·210.7); 환경 (`uv sync` 또는 `pip install -r requirements.txt`, torch cu126 index, `CUDA_VISIBLE_DEVICES=""`로 CPU 실행); 단일 명령 (`uv run python -m gmst.run_all`, `--no-final`, `--smoke`, `--occ-floor`, `--package`); 산출물 표 (file → 보고서 장, PRD §6 table); 데이터 주의점 요약 (DC1–DC16 처리 규칙 한 줄씩); 모델 선택 (B1은 벤치마크, 제출은 항상 B4 계열; 게이트 = B1 대비 ΔMAE·Δ평균Brier CI 상한 < 0; 개선 루프 B4-H → B4-IO → B4-KAN과 `selection.json`의 시도 목록·개수·다중비교 주의문, B1 대비 잔여 격차); 제출파일 스키마 (`test_predictions.csv` 33열, `model` 열 의미 = `select_variant`가 정한 B4 변형 ID `B4`/`B4-H`/`B4-IO`/`B4-KAN`, `eval_mask.csv`); 외부자료 (`HOLIDAYS_2021` 하드코딩과 출처 한국천문연구원 특일정보, 한전 산업용(을) 2021 요금표와 출처, 외부 기상 미사용과 근거 = oracle-weather `AWstar − main` 결과(휴리스틱 상한, 수치는 `results/bootstrap.csv`에서 인용)); ₩ 가정 (전력 단위 "15분 평균 kW" 가정, 상대변화(%) 병기, 래칫 바닥 222 → 7–8월 기본요금 절감 ≈ 0, kWh당 가산요금은 `d_kwh ≈ 0`일 때만 상쇄); 재현성 (seed 0, 날짜별 MC seed, CUDA/CPU, 같은 장치 재실행 차 ≤ 1e-6); 폴더 구조; 제출 zip (`dist/kamp_power_src.zip`).
+- `README.md` (Korean, FR-101, no affiliation/logo, FR-7), sections in order: 개요 (문제정의 H=96 / L=672 / 00:00 발행 / C = fold 학습 가동일 일최대 q50·q75·q90, 테스트 186.5·198·210.7); 환경 (`uv sync` 또는 `pip install -r requirements.txt`, torch cu126 index, `CUDA_VISIBLE_DEVICES=""`로 CPU 실행); 단일 명령 (`uv run python -m gmst.run_all`, `--no-final`, `--smoke`, `--final`, `--occ-floor`, `--package`); 산출물 표 (file → 보고서 장, PRD §6 table); 데이터 주의점 요약 (DC1–DC16 처리 규칙 한 줄씩); 모델 선택 (B1은 벤치마크, 제출은 항상 B4 계열; 게이트 = B1 대비 ΔMAE·Δ평균Brier CI 상한 < 0; 개선 루프 B4-H → B4-IO → B4-KAN과 `selection.json`의 시도 목록·개수·다중비교 주의문, B1 대비 잔여 격차); 제출파일 스키마 (`test_predictions.csv` 33열, `model` 열 의미 = `select_variant`가 정한 B4 변형 ID `B4`/`B4-H`/`B4-IO`/`B4-KAN`, `eval_mask.csv`); 외부자료 (`HOLIDAYS_2021` 하드코딩과 출처 한국천문연구원 특일정보, 한전 산업용(을) 2021 요금표와 출처, 외부 기상 미사용과 근거 = oracle-weather `AWstar − main` 결과(휴리스틱 상한, 수치는 `results/bootstrap.csv`에서 인용)); ₩ 가정 (전력 단위 "15분 평균 kW" 가정, 상대변화(%) 병기, 래칫 바닥 222 → 7–8월 기본요금 절감 ≈ 0, kWh당 가산요금은 `d_kwh ≈ 0`일 때만 상쇄); 재현성 (seed 0, 날짜별 MC seed, CUDA/CPU, 봉인 전 pseudo-test 같은 장치 재실행 차 ≤ 1e-6); 폴더 구조; 제출 zip (`dist/kamp_power_src.zip`).
 - `PONYTAIL-DEBT.md`: generated with the `ponytail:ponytail-debt` skill (invoke it with the Skill tool), then shaped into per-module Markdown tables with the header `| file:line | 지름길 | 한계 (ceiling) | 업그레이드 조건 (trigger) | 근거 |`; one row per line found by `grep -rnE '(#|//) ?ponytail:' gmst tests`, the first cell is `gmst/<file>.py:<line>` (or `tests/…`); the 근거 cell carries the FR / v2 / 수정 reference from the marker. Add a "발동된 트리거" section listing any trigger that fired in Tasks 20–24 (e.g. B1 ≥ B0′, occupancy collapse), or "없음".
 
 - [ ] **Step 1: Write the failing tests** — append to `tests/test_style.py`:
@@ -3230,11 +1551,7 @@ def test_readme_sections():
   - `uv run pytest -q` → all passed; `CUDA_VISIBLE_DEVICES="" uv run pytest -q` → all passed (G2).
   - `grep -rnE '(#|//) ?ponytail:' gmst tests | wc -l` equals the ledger row count (the test checks it).
   - `uv run python -m gmst.run_all --package` → `dist/kamp_power_src.zip` (not committed; `dist/` is ignored).
-- [ ] **Step 5: Commit**
-```bash
-git add README.md PONYTAIL-DEBT.md tests/test_style.py
-git commit -m "docs: README (FR-101) and PONYTAIL-DEBT.md ledger harvested from ponytail markers"
-```
+- [ ] **Step 5: Verify**
 
 ---
 
@@ -3290,27 +1607,26 @@ git commit -m "docs: README (FR-101) and PONYTAIL-DEBT.md ledger harvested from 
 
 Result: 19/19 active stories, 104/104 active FRs, 16/16 caveats and 8/8 goals map to at least one task.
 
-## Self-review notes
+## Current review resolution
 
-- Placeholder scan: no "TBD/TODO/similar to"; every code step has complete test code; implementation code is intentionally absent (user override).
-- Name consistency checked across tasks: `rolling_origin` returns 4 values everywhere; state keys (`model, m, C, s_op, best_epoch, history, val_nll, device, protocol, kind, K, train_idx, inner_state`); loop names (variants `main/H/IO/KAN`, model IDs `B4/B4-H/B4-IO/B4-KAN`, comparisons `<model ID>-B1`, factory flags `emission_source`, `decoder`, `kan`); `gate_pass` / `select_variant` (spec a82ea9d names); file schemas `SLOT_COLS`, `DAY_COLS`, `SCN_DAY_COLS`, `SCN_MONTH_COLS`, `PRED_COLS`.
-- Numbers asserted in tests were re-derived read-only on data ≤ 2021-08-31 while writing the plan (copy rule and partners, usable counts 6,240 / 11,256 / 11,352 / 23,064 / 11,544 / 23,256, thresholds and event counts per fold, lag-7 and B0′ tables, backbone R²/sd/lag-1, ratchet 222 at 07-19 11:15, natural same-slot maximum 9, 10-unit bins 2082/569/326, inner-window and scenario-day counts). Values involving 2021-09-01…09-14 (74 zeros incl. 09-08, 142 events, C_test from ≤ 08-30 only) come from the spec, not from computation.
+The approved 2026-09-23 review R1–R8 and modeling notes are resolved in the shared contracts and tasks above. Historical code snippets in unaffected tasks remain examples; where any old example conflicts, use the reviewed contract, PRD and v2 as amended. The 26 task headings and requirement mapping remain intact.
 
-## Spec issues found
+- Data: derive 53 usable OOF days from finite targets; point/day risk denominators differ.
+- Time order: split each outer train into fit, tuning and calibration days; choose τ/h, IO/KAN and early stopping per fold, never by pooling later folds. Final September settings are chosen from pre-September train only.
+- Risk: every model and variant supplies cal-day predictions and a p* key; calibrators use train-period rows for outer OOF and same-variant pre-September OOF for final.
+- Run state: K4 and isotonic are explicit run/not_run options. Omitted ablations have no manufactured scores.
+- Evaluation: outer NLL is computed after fit. Missing-predecessor AR likelihood is a stationary-reset approximation. KAN uses 2M+3 features and 162 transition parameters at K=3,M=12.
+- Submission: smoke and reproducibility use Aug 18–31 pseudo-test; only explicit --final unseals September after selection. Error analysis and submission carry model plus variant.
+- Interpretation: A+ assumes the observed operating flag stands in for a known 00:00 schedule. The post-selection CI gate is exploratory; B1 remains a fixed 100-round benchmark and never the submitted model.
 
-1. **FR-56 / v2 A13 "54 usable OOF days"** — the 54-day set (56 minus the suspect days) still contains 2021-07-30, an exact copy whose target is fully masked, so only 53 days carry weight. The plan implements the ruled 54 (R5) and asserts it from the day table; 07-30 contributes zero to every numerator and denominator.
-2. **US-006 lag-1 and "01-02를 빼면 4.47"** — 0.909 / 0.961 reproduce only when NaNs are dropped and consecutive observed residuals are paired (the adjacent-pair definition gives 0.962 on ≤ 08-31); 4.47 is the non-op sd with 01-02's residuals dropped but the cell means kept (refitting without 01-02 gives 1.68). The plan pins both definitions in its tests.
-3. **US-005 thresholds** — f3 C75 is exactly 197.75 (the PRD prints 197.8); tests use 197.75.
-4. **DC11 / v2 부록 B monthly mid/peak maxima** (Feb 195, Mar 200, Jun 202) include copy days; under FR-85's masking Feb is 193 and Mar/Jun have no usable mid/peak points. The 222 floor (07-19 11:15) is unaffected.
-5. **FR-33 vs FR-54** — FR-33 lists 보정함수 among the inner-validated items while FR-54 keeps leave-one-fold-out calibration; the plan follows FR-54 (it also never uses a fold's own validation labels).
-6. **R10 inner windows overlap earlier validation windows** — the inner windows of f2–f4 (07-13…19, 07-27…08-02, 08-10…16) lie inside the f1–f3 validation windows, so any pooled-over-folds inner selection (FR-61 (τ, h); the IO/KAN grids) touches earlier folds' validation labels. The plan keeps FR-61's pooling but makes p* strictly per fold (own inner window; test p* from 08-24…08-30).
-7. **FR-61 test-fit parenthetical** "(≤08-30 학습구간의 마지막 7일 내부검증)" is ambiguous; the plan uses one global (τ, h) everywhere.
-8. **Daily η\*_d** — v2 §12 reports a daily break-even, but PRD US-016's `scenarios.csv` schema lacks it; the plan appends `eta_star` (v2 wins).
-9. **FR-102 vs v2 §20 ②** — the zip list omits `PONYTAIL-DEBT.md`; the plan includes it (v2 wins).
-10. **US-012** asks for tolerance checks yet says to report "seed 의존" when exceeded; the plan gates the tolerances on synthetic data and records the real-data verdict in `state_stability.csv`.
-11. **FR-38** is silent on recomputing the issued risk on observed slots; the plan keeps the issued risk (only 09-08 is affected).
-12. **B4-H training-day centre (FR-107, A34)** — "fold-safe B1 forecast" is defined for issue days only; B1's own fit on the fold's train window would give in-sample centres on the HMM's training days. The plan pins 5-block cross-fitting inside the train window for those days.
-13. **`emission_source` placement (US-021)** — the PRD puts it on the `CondHMM` constructor, but `m_t` is data built outside the torch module; the plan puts the switch on the `hmm_model` factory and tests the PRD property (`m_t` equals `predict_b1`'s median on issue days).
-14. **`gate_pass` signature (US-008)** — the PRD writes `gate_pass(variant_metrics, b1_metrics)`; the plan passes the bootstrap rows (`gate_pass(boot, "<model>-B1")`), which already hold both sides.
-15. **B4-KAN (FR-109, v2 §9.6 ③)** — the formula keeps an intercept `b_ij` next to per-op splines, while the stated parameter count (2M + 4 per pair) has none, and a partition-of-unity spline makes the intercept redundant; the plan drops it. The 4-value λ_spl grid ("격자 3×4") is not listed; the plan uses {0, 0.01, 0.1, 1}, the IO grid, with pooled inner NLL as the criterion for both.
-16. **FR-99 smoke** necessarily runs the final stage on the test window (into a temp dir); the plan forbids reading those values and only schema-checks them.
+## Submission handoff checklist
+
+| Deliverable | Owner role | Target date | Verification |
+|---|---|---|---|
+| Six-chapter report PDF and figures | Report owner | 2026-10-06 | Sections 1–6 use frozen results and disclose all tried variants, CI caveat, gaps, schedule-proxy assumption |
+| Survey completion capture | Submission owner | 2026-10-06 | Capture opens and identifying details are removed where required |
+| Presentation PDF and PPT | Presentation owner | 2026-10-06 | Both formats open and use final selected B4 ID |
+| Source ZIP, requirements, README, predictions and mask | Code owner | 2026-10-06 | Package check, 1,344-row prediction schema, no credentials or affiliation |
+| Blind review and portal submission receipt | Submission owner | 2026-10-08 23:59 | Files checked for affiliation/logo and portal confirms receipt |
+
+2026-10-07–08 remain buffer days; the final portal deadline is 2026-10-08 23:59. Roles are assignments to be filled by the team, not invented people.

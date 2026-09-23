@@ -1,0 +1,27 @@
+{
+  "status": "development_only",
+  "pc_qualified": false,
+  "winners_by_seed": {
+    "0": "B3",
+    "1": "B4-low",
+    "2": "B4-PC"
+  },
+  "tail_u": 0.5,
+  "tail_alpha": 0.05,
+  "pc_rate": 5.585301205481888,
+  "folds": [
+    "ar1",
+    "ar2",
+    "ar3",
+    "ar4",
+    "ar5",
+    "ar6",
+    "ar7",
+    "ar8"
+  ],
+  "seeds": [
+    0,
+    1,
+    2
+  ]
+}

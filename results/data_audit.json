@@ -1,0 +1,21 @@
+{
+  "n_rows_raw": 6168,
+  "n_rows_15min": 24672,
+  "n_days": 257,
+  "zero_points": 74,
+  "zero_by_day": {
+    "2021-08-28": 26,
+    "2021-08-29": 46,
+    "2021-09-08": 2
+  },
+  "wind_null_hours": 3,
+  "precip_null_hours": 1,
+  "time_col_mismatch_rows": 48,
+  "time_col_mismatch_dates": [
+    "2021-07-13",
+    "2021-07-15"
+  ],
+  "공장인원_max_abs_err": 4.944070042256499e-09,
+  "공장인원_n": 6151,
+  "평균_match": 6168
+}

@@ -1,0 +1,602 @@
+{
+  "B0/main": {
+    "C50": {
+      "brier": 0.21748957431963672,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.7709677419354839,
+      "bss_cond": -0.6425414401293803,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": false
+    },
+    "C75": {
+      "brier": 0.3409567348646739,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.6365079365079365,
+      "bss_cond": -0.4488750094533822,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.2828850673321685,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.5040485829959515,
+      "bss_cond": -0.4114770436802584,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B0p/main": {
+    "C50": {
+      "brier": 0.0615427907655615,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9669354838709677,
+      "bss_cond": 0.5352118165209927,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.255380667115099,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.7507936507936508,
+      "bss_cond": -0.08522468877894229,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.1516782286707544,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.7530364372469636,
+      "bss_cond": 0.24318968189485213,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": true
+  },
+  "BB/main": {
+    "C50": {
+      "brier": 0.2158490825604963,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.589516129032258,
+      "bss_cond": -0.6301519924742078,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": false
+    },
+    "C75": {
+      "brier": 0.3032416872929882,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.44206349206349205,
+      "bss_cond": -0.2886071973843545,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.24377633222572073,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.4271255060728745,
+      "bss_cond": -0.21634096834509342,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B1/main": {
+    "C50": {
+      "brier": 0.05201872224788346,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9661290322580646,
+      "bss_cond": 0.6071402170792963,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.23616009275322405,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.7412698412698413,
+      "bss_cond": -0.0035480212940957045,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.15238479324077359,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.7064777327935222,
+      "bss_cond": 0.2396642230225785,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": true
+  },
+  "B2/main": {
+    "C50": {
+      "brier": 0.019606248654167224,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9564516129032258,
+      "bss_cond": 0.8519281855201879,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.23617146880411247,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.8253968253968254,
+      "bss_cond": -0.0035963631338455926,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.2242441668201729,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.6761133603238867,
+      "bss_cond": -0.11888371002002174,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B3/main": {
+    "C50": {
+      "brier": 0.01995414389192556,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9790322580645161,
+      "bss_cond": 0.8493007844292192,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.15592933030273193,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.9619047619047619,
+      "bss_cond": 0.33738774801999727,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.25733278779679125,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.7165991902834008,
+      "bss_cond": -0.28398195771470625,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B4/main": {
+    "C50": {
+      "brier": 0.01960665656200287,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9758064516129032,
+      "bss_cond": 0.8519251048873534,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.2611300950608662,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.7904761904761904,
+      "bss_cond": -0.10965653486809868,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.16849770846973114,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.8461538461538461,
+      "bss_cond": 0.15926757937176894,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": true
+  },
+  "B1/copies": {
+    "C50": {
+      "brier": 0.12541591788044304,
+      "brier_climcond": 0.11377257057257056,
+      "auc": 0.9359375,
+      "bss_cond": -0.10233879088146014,
+      "n_events": 32,
+      "n_days": 52,
+      "pass": false
+    },
+    "C75": {
+      "brier": 0.21132917146971572,
+      "brier_climcond": 0.23719180566920836,
+      "auc": 0.8065476190476191,
+      "bss_cond": 0.10903679461659443,
+      "n_events": 24,
+      "n_days": 52,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.12303272266914307,
+      "brier_climcond": 0.22006725735361432,
+      "auc": 0.9009009009009009,
+      "bss_cond": 0.4409312673377468,
+      "n_events": 15,
+      "n_days": 52,
+      "pass": true
+    },
+    "discrimination_missing": true
+  },
+  "B4/copies": {
+    "C50": {
+      "brier": 0.01922688908963041,
+      "brier_climcond": 0.11377257057257056,
+      "auc": 0.9609375,
+      "bss_cond": 0.8310059358519423,
+      "n_events": 32,
+      "n_days": 52,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.13091454594511492,
+      "brier_climcond": 0.23719180566920836,
+      "auc": 0.8809523809523809,
+      "bss_cond": 0.4480646345443715,
+      "n_events": 24,
+      "n_days": 52,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.21472677527169684,
+      "brier_climcond": 0.22006725735361432,
+      "auc": 0.6972972972972973,
+      "bss_cond": 0.024267499609613163,
+      "n_events": 15,
+      "n_days": 52,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B1/suspect": {
+    "C50": {
+      "brier": 0.08305514633997398,
+      "brier_climcond": 0.14288494782655992,
+      "auc": 0.9330357142857143,
+      "bss_cond": 0.41872711154438746,
+      "n_events": 32,
+      "n_days": 53,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.25333918391657084,
+      "brier_climcond": 0.2504349715286071,
+      "auc": 0.7666666666666667,
+      "bss_cond": -0.011596672662116614,
+      "n_events": 23,
+      "n_days": 53,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.2002863644778831,
+      "brier_climcond": 0.21236848994044602,
+      "auc": 0.6181318681318682,
+      "bss_cond": 0.05689226996882213,
+      "n_events": 14,
+      "n_days": 53,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B4/suspect": {
+    "C50": {
+      "brier": 0.03773443977072548,
+      "brier_climcond": 0.14288494782655992,
+      "auc": 0.9241071428571429,
+      "bss_cond": 0.7359103226427376,
+      "n_events": 32,
+      "n_days": 53,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.22771282408813218,
+      "brier_climcond": 0.2504349715286071,
+      "auc": 0.7884057971014493,
+      "bss_cond": 0.0907307286270096,
+      "n_events": 23,
+      "n_days": 53,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.20010866026124463,
+      "brier_climcond": 0.21236848994044602,
+      "auc": 0.8562271062271062,
+      "bss_cond": 0.05772904296037229,
+      "n_events": 14,
+      "n_days": 53,
+      "pass": true
+    },
+    "discrimination_missing": false
+  },
+  "B1/protoA": {
+    "C50": {
+      "brier": 0.1746310237881783,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9145161290322581,
+      "bss_cond": -0.31886180844119805,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": false
+    },
+    "C75": {
+      "brier": 0.27448297559949136,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.7547619047619047,
+      "bss_cond": -0.16639879257510404,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.1530730956287089,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.798582995951417,
+      "bss_cond": 0.2362298847280787,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": true
+  },
+  "B4/protoA": {
+    "C50": {
+      "brier": 0.08000666000224119,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9129032258064517,
+      "bss_cond": 0.3957675674748067,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.25364153720122373,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.7841269841269841,
+      "bss_cond": -0.07783436146539979,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": false
+    },
+    "C90": {
+      "brier": 0.16387517758707068,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.8825910931174089,
+      "bss_cond": 0.18233205670919228,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": true
+  },
+  "B4/K2": {
+    "C50": {
+      "brier": 0.019606387176368787,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9766129032258064,
+      "bss_cond": 0.8519271393621954,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.21413844814647873,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.8198412698412698,
+      "bss_cond": 0.09003162467019632,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.14824446530163635,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.8643724696356275,
+      "bss_cond": 0.26032271127193574,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": false
+  },
+  "B4/re": {
+    "C50": {
+      "brier": 0.019586710760625015,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9741935483870968,
+      "bss_cond": 0.8520757410979498,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.19606811198028043,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.8960317460317461,
+      "bss_cond": 0.16682042455713175,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.21517474607029083,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.805668016194332,
+      "bss_cond": -0.07363112985146714,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B1/AWstar": {
+    "C50": {
+      "brier": 0.03411388256283878,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9870967741935484,
+      "bss_cond": 0.7423625202796187,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.2282045176029823,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.8476190476190476,
+      "bss_cond": 0.030258713820224714,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.14795120943663964,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.7419028340080972,
+      "bss_cond": 0.2617859342171094,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": false
+  },
+  "B4/B": {
+    "C50": {
+      "brier": 0.02787591541539496,
+      "brier_climcond": 0.12349078047391035,
+      "auc": 0.9932065217391305,
+      "bss_cond": 0.7742672342954036,
+      "n_events": 23,
+      "n_days": 39,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.1868155693779155,
+      "brier_climcond": 0.1967863917595229,
+      "auc": 0.8727810650887574,
+      "bss_cond": 0.050668251460151525,
+      "n_events": 13,
+      "n_days": 39,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.31861580941968687,
+      "brier_climcond": 0.17978023627824583,
+      "auc": 0.562962962962963,
+      "bss_cond": -0.7722515890265338,
+      "n_events": 9,
+      "n_days": 39,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B4/H": {
+    "C50": {
+      "brier": 0.0815099391483795,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9709677419354839,
+      "bss_cond": 0.38441438743691847,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.20392947736786415,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.8031746031746032,
+      "bss_cond": 0.1334140281274715,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.13569745344217918,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.8582995951417004,
+      "bss_cond": 0.32292700273710717,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": true
+    },
+    "discrimination_missing": false
+  },
+  "B4/IO": {
+    "C50": {
+      "brier": 0.01960744722225105,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9661290322580646,
+      "bss_cond": 0.8519191336023998,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.21921197345823884,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.7603174603174603,
+      "bss_cond": 0.06847198591733228,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.3269093833852811,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.6437246963562753,
+      "bss_cond": -0.6311397924379638,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  },
+  "B4/KAN": {
+    "C50": {
+      "brier": 0.019606144474037825,
+      "brier_climcond": 0.13241040317528027,
+      "auc": 0.9741935483870968,
+      "bss_cond": 0.8519289723173495,
+      "n_events": 31,
+      "n_days": 51,
+      "pass": true
+    },
+    "C75": {
+      "brier": 0.19866872001968375,
+      "brier_climcond": 0.235325154095457,
+      "auc": 0.8777777777777778,
+      "bss_cond": 0.15576929808746243,
+      "n_events": 21,
+      "n_days": 51,
+      "pass": true
+    },
+    "C90": {
+      "brier": 0.22970569302906788,
+      "brier_climcond": 0.20041775996198943,
+      "auc": 0.8006072874493927,
+      "bss_cond": -0.14613441978711417,
+      "n_events": 13,
+      "n_days": 51,
+      "pass": false
+    },
+    "discrimination_missing": true
+  }
+}

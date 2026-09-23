@@ -1,0 +1,13 @@
+model,variant,fold,threshold,n_cal,status
+B0p,main,test,C50,5,ok
+B0p,main,test,C75,5,ok
+B0p,main,test,C90,5,single_class
+B4,main,test,C50,5,ok
+B4,main,test,C75,5,ok
+B4,main,test,C90,5,single_class
+B1,main,test,C50,5,ok
+B1,main,test,C75,5,ok
+B1,main,test,C90,5,single_class
+B0,main,test,C50,5,ok
+B0,main,test,C75,5,ok
+B0,main,test,C90,5,single_class

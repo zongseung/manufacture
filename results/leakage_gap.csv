@@ -1,0 +1,3 @@
+split,mae,n,n_days,n_splits,max_same_slot
+random_day_5fold,15.53652897263415,23064,241,5,96
+loeo,16.721077604254624,23064,241,126,67

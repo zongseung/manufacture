@@ -29,7 +29,7 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - **예측문제**: 매일 00:00 발행, 전일 23:45까지 정보 사용, 당일 15분 96슬롯(H=96) 예측, 정보길이 L=672 `[v2 §4.5]`.
 - **피크위험**: 달력일 최대 \(M_d\)가 임계값 \(C\)(fold 학습구간 가동일 일최대의 q50/q75/q90)를 넘을 확률 `[v2 §4.5, A1]`.
 - **모델 사다리**: B0(lag-7 naive), B0′(가동달력 naive), **B1(LightGBM, 벤치마크 — 대체 제출 후보 아님)**, BB(백본 단독), B2/B3/B4(백본 + 고정/조건부 HMM, B4 = Contest Core v1: 순환 RW2 백본 + K=3 조건부 Markov + 상태 내 AR(1) + MC 피크위험 + Platt 보정) `[v2 §15.4, §19]`. 제출 모델은 항상 Core B4 계열이다: B4가 §15.6의 성공 기준(CI 게이트)을 못 넘기면 사전등록 개선 루프(B4-H → B4-IO(조건부 디코더) → B4-KAN, §9.6/US-021)를 2026-10-03까지 돌려 최선의 변형을 제출한다(사용자 결정) `[v2 §5.2, §9.6, §15.6]`.
-- **두 트랙**: MAIN(A+, 제출) = 과거 + 달력 + 당일 가동플래그 + 공휴일, SCENARIO(B) = A+ + 당일 생산량(계획 대용, 상한) `[v2 §4.6, 결정-프로토콜]`.
+- **두 트랙**: MAIN(A+, 제출) = 과거 + 달력 + 당일 가동플래그 + 공휴일, SCENARIO(B) = A+ + 당일 생산량(계획 대용, 상한). A+의 과거 가동플래그는 실현 생산량에서 재구성한 00:00 일정 대리값이다. 실제 운영 전 계획 오차 민감도와 Protocol A 비교를 보고한다 [v2 §4.6, 검토 modeling-7].
 - **검증**: 07-01 이후 rolling-origin f1–f4(각 14일, gap 1일, 중복그룹 purge), 봉인 테스트 09-01~09-14는 선택이 끝난 뒤 1회 `[v2 §15, 결정-프로토콜]`.
 - **현장활용**: SCENARIO 트랙의 생산일정 이동 what-if와 한전 산업용(을) 2021 요금 기준 ₩ 환산. 래칫 바닥 222(07-19) 때문에 7–8월 기본요금 절감은 사실상 0이고, ₩ 절감의 주 수단은 TOU 전력량요금 이동이다 `[v2 §12.1, 판정]`.
 - **외부자료**: 2021 공휴일(하드코딩)과 한전 요금표만. KMA 기상은 쓰지 않는다(사용자 결정). MAIN은 과거 관측 기상만 쓰고, 기상의 최대 기여는 oracle-weather ablation으로만 보인다 `[v2 §4.6, §4.7]`.
@@ -79,7 +79,7 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 
 ## 3. 사용자 스토리 (User Stories)
 
-**모든 스토리 공통 규칙** `[결정-코드, 수정-4]`: ponytail 스타일(최소 코드, stdlib → 이미 설치된 의존성 우선, 한 구현뿐인 인터페이스·팩토리·설정파일 금지). 의도적 지름길은 반드시 `# ponytail: <ceiling>, <upgrade trigger>` 주석. 모든 스토리의 마지막 수용기준은 "`uv run pytest -q` 통과". 구현 모델: fable `[결정-코드]`.
+**모든 스토리 공통 규칙** `[결정-코드, 수정-4]`: ponytail 스타일(최소 코드, stdlib → 이미 설치된 의존성 우선, 한 구현뿐인 인터페이스·팩토리·설정파일 금지). 의도적 지름길은 반드시 `# ponytail: <ceiling>, <upgrade trigger>` 주석. 모든 스토리의 마지막 수용기준은 "`uv run pytest -q` 통과". 구현 모델: Astra/Ponytail(2026-09-23 검토 후 결정; 종전 fable 지정 폐기) `[결정-코드]`.
 
 ### US-001: 의존성과 폴더 골격
 **Description:** 구현자로서 필요한 의존성과 빈 패키지·테스트 골격을 갖춰, 이후 스토리가 같은 규칙 위에서 시작하게 하고 싶다.
@@ -152,7 +152,7 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - [ ] `tau=0, half_life=None, min_days=1`로 07-01~08-31(마스킹) 셀평균 적합 시 R² = 0.923 (n = 5,592), 잔차 sd(ddof=1) 가동 19.95 / 비가동 1.55 (±0.02), 잔차 lag-1 자기상관 0.909 (±0.002). 같은 적합을 ≤08-31 전체(마스킹)에 하면 잔차 sd 가동 32.36 / 비가동 7.31, lag-1 0.961 (01-02를 빼면 비가동 4.47) `[v2 §4.3, §9, §11.2, 부록B]`
 - [ ] τ가 매우 크면(1e8) 각 프로파일의 표준편차 < 1e-3 (상수로 수렴)
 - [ ] f1 학습에서 `fallback_classes`에 (가동, 일)과 (비가동, 토)가 반드시 포함(사용가능일 < 5)
-- [ ] 격자 τ `{0.1, 1, 10, 100, 1000}` × 반감기 h `{30, 60, 120}`일(15조합) 선택 함수가 f1–f4 pooled BB MAE로 (τ, h)를 고르고 `results/backbone_tau.csv`(tau, half_life, mae_pooled)에 기록 `[v2 §6, A6]`
+- [ ] 격자 τ {0.1,1,10,100,1000} × h {30,60,120}에서 select_tau(panel,fold,train_idx=None)가 해당 fold train의 tuning_idx만으로 (τ,h)를 선택한다. backbone_tau.csv에는 fold,tau,half_life,mae_tune,n_tune,status를 기록하고 최종 09월 설정도 pre-September train에서 별도 선택한다 [FR-61, 검토 R2].
 - [ ] B1용 행별 확장창 백본: 대상일 d의 값은 d−2일까지의 데이터로 적합한 프로파일(`backbone_asof(d)`), 학습·검증 행 모두 같은 방식 `[v2 §6, A32]`
 - [ ] 불변성: 검증창 Y를 교란해도 fold 학습 프로파일 동일
 - [ ] `uv run pytest -q` 통과
@@ -177,9 +177,9 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 **Description:** 연구자로서 위험확률을 누수 없이 보정하고, 판별력을 점검하고, 신뢰구간으로 B4가 벤치마크 B1을 이기는 성공 기준을 만족하는지 판정하고 싶다(만족하지 못하면 US-021의 개선 루프로 넘어간다).
 
 **Acceptance Criteria:**
-- [ ] `gmst/evaluate.py`: `platt_fit/platt_apply`(입력을 [1/(2N), 1−1/(2N)], N=2,000으로 클리핑 후 logit), `pav_fit/pav_apply`(isotonic), `calibrate_oof(days_df, method)`(leave-one-fold-out), `p_star`, `block_bootstrap`, `dm_test`, `climatology`, `risk_check`, `gate_pass`
+- [ ] gmst/evaluate.py: platt_fit/apply, 선택적 pav_fit/apply, calibrate_oof(days,method,inner,ref), p_star_table(inner,expected_keys), block_bootstrap, dm_test, climatology, risk_check, gate_pass를 구현한다. outer fold 보정은 자기 train의 cal_idx 예측만, 최종 보정은 동일 모델·변형 pre-September OOF만 사용한다.
 - [ ] 합성 데이터에서 Platt가 참 (a, b)를 ±0.1 이내 복원, PAV 출력 단조 + 알려진 예제와 일치
-- [ ] leave-one-fold-out: fold j 보정함수는 fold j 라벨을 뒤집어도 불변
+- [ ] fold j outer 라벨 및 이후 fold 라벨을 뒤집어도 j의 보정함수·p*·첫 00:00 예측은 불변이다. 나중 검증일 예측은 합법적 전일 관측으로 달라질 수 있다.
 - [ ] 기후값: 무조건부(학습 기저율)와 **가동여부×요일유형 조건부**(학습 사용가능일 기준, 클래스 비면 가동여부만; 공휴일은 넣지 않음) 둘 다; `bss_cond = 1 − Brier/Brier_climcond` `[v2 §11.3, 판정 Q8]`
 - [ ] `risk_check`: 모델×임계값별로 f1–f4 합산 OOF에서 보정 Brier, `Brier_climcond`, AUC, `bss_cond`, 사건 수를 `results/risk_check.json`에 쓰고, 통과 = 보정 Brier < `Brier_climcond` **그리고** AUC ≥ 0.70 **그리고** `bss_cond` > 0 (사건이 한 클래스뿐인 임계값은 AUC 대신 BSS만). 미통과면 `"discrimination_missing": true` `[v2 §11.3, A26]`
 - [ ] `block_bootstrap`(B=2,000, seed 0, 일 블록, pooled f1–f4)이 합성 차이에서 참값을 포함하는 CI 반환, 같은 seed면 결과 동일
@@ -209,7 +209,7 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - [ ] φ=0 모델에서 해석식 위험과 MC 위험(N=20,000)의 차이가 3·√(p(1−p)/N) 이내
 - [ ] 위험은 C에 대해 단조감소, 분위수 단조, `peak_time_mode` ∈ [0, 95](동률은 이른 슬롯), 날짜별 seed로 같은 입력이면 같은 출력
 - [ ] 사다리: B2(전이 특징 없음, θ 학습 안 함, φ≡0, 해석식 위험), B3(조건부, φ≡0, 해석식), B4(조건부 + AR(1) + MC); f1–f4 OOF가 model `B2/B3/B4`로 기록, 각 5,376 슬롯행·56 일행
-- [ ] variant `K2`, `K4`(B4), `re`(B4, 일 랜덤효과, FR-75, **진단 전용 ablation** — 개선 루프의 정식 단계 아님) 기록. §11.5 대응 순서: B3·B4·B4-H 판별력 점검(`risk_check`) → 미달이면 `re`로 원인을 진단(슬롯 잡음의 날짜 간 누적 여부) → 개선 루프는 US-021의 B4-IO(전일 요약으로 같은 역할을 결정론적으로 흡수)·B4-KAN으로 계속 진행 → **B1로 되돌아가지 않는다**(§5.2, §15.6, 사용자 결정) `[v2 §11.5, A30]`
+- [ ] variant K2와 re 진단은 실행한다. K4는 일정 컷에 따라 run/not_run으로 기록하며, not_run이면 OOF 행이나 점수를 요구하지 않는다. 위험 포화는 B3·B4·B4-H의 날짜별 위험 분산, AUC, 조건부 Brier skill, 일최대 분위수 coverage와 re 진단으로 확인한다.
 - [ ] 최종 epoch = f1–f4 best epoch 중앙값(정수 반올림)이 `selection.json`에 기록될 값으로 반환
 - [ ] `uv run pytest -q` 통과
 
@@ -321,10 +321,10 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - [ ] `ybar_prev[d]`/`ymax_prev[d]` = 전일(d−1) 관측 슬롯에서 \((Y-m)\)의 평균/최댓값, 관측 슬롯이 0개면 0(감사 로그에 `ybar_prev_missing_days` 카운트만 남기고 u_features 자체는 13열 고정)
 - [ ] `CondHMM` 생성자에 `decoder: "const"|"io" = "const"`(B4-IO) 추가. `"io"`이면 파라미터가 `a`(K×13), `b`(K×13), `c`(K×3)이고 \(\delta_{t,1}=\mathbf a_1^\top\mathbf u_t\), \(\delta_{t,k}=\delta_{t,k-1}+\mathrm{softplus}(\mathbf a_k^\top\mathbf u_t)\)(k=2..K), \(\mu_{t,k}=m_t+\delta_{t,k}\), \(\sigma_{t,k}=1+\mathrm{softplus}(\mathbf b_k^\top\mathbf u_t)\), \(\phi_{t,k}=\mathrm{sigmoid}(\mathbf c_k^\top\mathbf v_t)\)로 매 시각 재계산된다. 쌍 emission·마스킹·forward·MC 식은 §9–§11과 동일(상수 \(\delta_{k,op},\sigma_{k,op},\phi_k\) 자리에 시변값을 대입)
 - [ ] K=3에서 `decoder="io"`의 학습 파라미터 수 = `a`(39) + `b`(39) + `c`(9) = **87**(단위테스트로 고정 확인). `decoder="const"`의 기존 파라미터 수(105, US-009)와 별개로 집계
-- [ ] `a`, `b`의 조화항 열(`sin1,cos1,sin2,cos2,op_sin1,op_cos1`)과 전일요약 열(`ybar_prev,ymax_prev`)에만 L2 벌점 `lambda_io * sum(coef**2)`을 손실에 더하고, 절편·`op`·`sat`·`sun`·`hol` 열 계수는 벌점에서 제외. `lambda_io`는 격자(예 `{0, 0.01, 0.1, 1}`)에서 **내부검증**(R10, fold 학습구간 마지막 7일) NLL로 선택하고 `results/backbone_tau.csv`와 같은 형식으로 `results/io_lambda.csv`에 기록
+- [ ] IO의 조화항·전일요약 계수에만 L2를 적용한다. lambda_io는 각 fold train의 tuning_idx NLL로 별도 고르고 io_lambda.csv에 fold,lambda_io,nll_tune,n_tune,status를 쓴다. 튜닝이 비면 사전값 0.01과 default_empty를 기록한다.
 - [ ] variant `IO`(B4-IO, model `B4`)로 f1–f4 OOF 기록. `H`가 채택되지 않았으면 `decoder="io"`도 `emission_source="backbone"`으로, `H`가 채택됐으면 `emission_source="b1"` 위에서 `decoder="io"`를 적용(순차 탐색)
-- [ ] `gmst/hmm.py::z_features`에 `kan: bool = False` 인자 추가(B4-KAN, §9.6 ③). `kan=True`면 전이 특징의 sin/cos 조화항 6차원 + 가동×조화 교호 4차원(총 10차원)을 제거하고, 대신 `g(q, op) = sum_m c[op, m] * B_m(q)`(주기 3차 B-스플라인, 매듭 수 `M ∈ {8,12,16}`, 균등 간격, 순환 경계)를 전이 logit에 더한다. 0/1 플래그(토/일/공휴일/가동) 4차원은 그대로 선형 유지
-- [ ] `M`과 매끄러움 벌점 `lambda_spl`은 R10 내부검증 pooled NLL로 함께 선택(격자 3×4, `results/kan_grid.csv`에 (M, lambda_spl, nll) 기록). 벌점 = `lambda_spl * sum((c[op,m+1] - c[op,m])**2)`(m을 M에서 1로 순환)
+- [ ] B4-KAN z_features(kan=True,M)는 가동별 M개 spline 두 블록과 토/일/공휴일 3개 선형 플래그, 총 2M+3차원을 반환한다. 별도 op 계수와 intercept는 제거한다. K=3,M=12 전이 모수는 162개다.
+- [ ] M과 lambda_spl은 각 fold train의 tuning_idx NLL로 별도 선택하고 kan_grid.csv에 fold,M,lambda_spl,nll_tune,n_tune,status를 기록한다. 빈 튜닝은 (12,0.01)과 default_empty를 사용한다.
 - [ ] variant `KAN`(B4-KAN, model `B4`)로 f1–f4 OOF 기록. 순서상 `H`·`IO` 채택 결과 위에서 적용(순차 탐색)
 - [ ] `select_variant(candidates: dict[str, metrics]) -> dict`: 각 후보(`main`(B4 기본), `H`, `IO`, `KAN` 중 실제로 시도된 것들)에 대해 US-008의 `gate_pass`를 계산하고, 하나라도 `True`면 **그중 평균 OOF MAE가 가장 낮은 것**을 반환, 전부 `False`면(=2026-10-03 도달 시) 시도된 후보 전체 중 평균 OOF MAE가 가장 낮은 것(동률이면 C50/C75/C90 평균 Brier)을 반환. 반환값에 `gate_met: bool`, `tried: [...]`, `remaining_gap_to_b1: {...}` 포함 `[v2 §15.6]`
 - [ ] `results/selection.json`에 `select_variant`의 시도 순서·게이트 결과·최종 선택·B1 대비 잔여 격차를 기록(FR-57과 연결)
@@ -373,7 +373,7 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - FR-30: 달력 특징: `q`, `q % 4`, sin/cos(2πrq/96) r=1..3, 요일, `daytype`, 월, `season`(한전 월→계절: 6–8 여름, 3–5·9–10 봄가을, 11–2 겨울), `op`, `hol`. `전기요금(계절)`은 `season`과 동치임을 테스트로만 확인하고 특징으로 직접 쓰지 않는다 `[v2 §4.1, 요금표]`.
 - FR-31: B1 슬롯 특징(열 이름 고정): `q, q_mod4, sin1, cos1, sin2, cos2, sin3, cos3, dow, daytype, month, season, hol, op`(A+), `y_lag1, y_lag2, y_lag7`(같은 슬롯), `prev_last4_mean`(전일 23:00–23:45), `prev_mean, prev_max, prev_min`, `recent_same_mean`(최근 7일 중 같은 요일유형·가동여부 사용가능일의 슬롯 평균), `op_lag1, op_lag7`, `backbone`(행별 확장창 적합, d−2까지, A32), `prev_temp, prev_hum, prev_wind`(전일 일평균), `prev_rain`(전일 강수 합 = 시간값 24개 합), `prev_prod`(전일 생산량 합). MAIN의 기상 특징은 이 과거 관측값(`prev_*`)뿐이다. 프로토콜 추가열: B `prod_h, prod_on`, A+W*(oracle-weather ablation 전용) `ob_temp, ob_rain, ob_wind, ob_hum`(대상일 데이터 자체의 `기온, 강수량_증분, 풍속, 습도` 시간값) `[v2 §15.4, §4.6, A32]`.
 - FR-32: B1 일 단위 모델(\(M_d\) 분위수 회귀 19개 + 일피크 이진분류기 3개) 특징(행 = 일): `prev_mean, prev_max, prev_min, y_lag7_mean, y_lag7_max, recent_same_max, backbone_max, dow, daytype, month, hol, op, op_lag1` (+ 프로토콜 열의 일 집계) `[v2 §15.4, A14]`.
-- FR-33: 대상일 d의 모든 입력은 Y[:d], X[:d], 달력(d), 프로토콜이 허용한 d의 외생정보만의 함수다. fold 적합(백본 프로파일, C, B1, HMM 파라미터)은 그 fold의 train 역할 날짜만 쓴다. 백본 (τ, h)·\(p^*\)·보정함수·HMM early stopping은 **그 fold의 실제 검증일(f1–f4 outer)을 선택 기준으로 쓰지 않는다** — 대신 **내부검증**(각 fold 학습구간의 마지막 7일)으로 고르고, 고른 값으로 그 fold의 전체 학습구간(마지막 7일 포함)을 다시 적합해 그 fold의 검증일 예측에 쓴다. 테스트창은 어떤 경우에도 쓰지 않는다 `[v2 §6 누수 방지, §14, §15, 수정-8, 수정-10, 재검토 R10]`.
+- FR-33: 대상일 d의 입력은 과거 Y/X, 달력(d), 프로토콜 허용 당일 외생정보만이다. fold 적합은 그 fold train만 쓴다. 모든 (τ,h), IO/KAN 설정, early stopping은 FR-54의 해당 fold 튜닝일로만 결정하고, 보정·p*는 뒤의 분리된 보정일로 정한다. 선택 후 전체 train으로 재적합해 outer 검증에 쓴다. fold j의 outer 정답을 바꿔도 j의 선택값·fit 상태·첫 검증일 00:00 예측은 같아야 한다(이후 검증일은 전일 관측을 합법적으로 사용). 09월은 최종 선택이 고정된 뒤에만 접근한다 [v2 §6, §14, §15, 검토 R2].
 
 ### 4.5 지표·평가 (`gmst/evaluate.py`)
 - FR-34: 모든 모델의 예측 함수는 dict를 반환한다: `y_mean`(96), `y_median`(96), `q`(19×96 또는 None), `paths`(N×96 또는 None), `M_hat_median`, `M_hat_mean`, `peak_time_mode`(슬롯 0–95), `risk_raw`(3) `[v2 §9, §11]`.
@@ -381,12 +381,13 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - FR-36: MAE는 `y_median`, RMSE는 `y_mean`으로, 마스킹되지 않은 점만, n 기록 `[v2 §16.1, §15.5]`.
 - FR-37: CRPS = 19분위 pinball 평균 × 2. 구간 적중률 50%=(q25,q75), 80%=(q10,q90), 90%=(q05,q95) `[v2 §16.3, A11]`.
 - FR-38: 일 피크 대상일 = `n_missing ≤ 4`이고 로더가 목표를 가리지 않은 날(기본 설정에서 비복사·비편집복사·비suspect; ablation 스위치를 켜면 그 날도 포함). \(M^{true}_d\)와 예측 일최대는 **같은 관측 슬롯 집합**에서 계산: 경로가 있으면 경로별 관측슬롯 최대의 중앙값, B1은 일 단위 모델의 `M_hat_median`(학습 라벨 자체가 관측슬롯 기준 최대), 그 외(점예측 기준선)는 관측슬롯에서 `y_median`의 최대. 위험 사건 \(\mathbb 1[M_d>C]\)도 관측슬롯 기준. PeakMAE는 중앙값 사용, 피크시각 적중 = |argmax 실측 − `peak_time_mode`| ≤ 2 슬롯 `[v2 §16.2, A12, A24, 수정-6]`.
+  - 구현 검토 보완(2026-09-23): 경로 모델과 점예측 기준선의 평가 위험도 관측 슬롯 최대에서 다시 계산한다. 발행·제출 위험은 전체 96슬롯 그대로 유지한다. B1은 관측슬롯 최대를 라벨로 학습한 별도 일 분류기 확률을 유지하며, 경로가 없어 날짜별 결측 마스크 확률을 재구성할 수 없는 한계를 명시한다.
 - FR-39: 임계값 C(fold별) = 그 fold `train` 역할 날짜 중 가동 & 일피크 대상일의 일최대에 `np.quantile(..., [0.5, 0.75, 0.9])`(기본 linear) `[v2 §4.5, A1, 수정-10]`.
-- FR-40: Brier(임계값별 + 평균)를 raw·Platt·isotonic 확률로 계산. 기후값 Brier 두 가지: 무조건부(fold 학습 사용가능일 사건률), 조건부(같은 가동여부×요일유형 학습 사건률, 클래스가 비면 가동여부만; 공휴일은 클래스에 넣지 않음). `bss_cond = 1 − Brier/Brier_climcond` `[v2 §11.3, §16.3, 판정 Q8]`.
+- FR-40: Brier를 raw·Platt 확률로 계산하고, isotonic 실행 시에만 iso 지표를 추가한다. 무조건부·가동여부×요일유형 조건부 기후값과 bss_cond를 보고한다. iso 컷은 not_run 상태로 기록하며 0점으로 대체하지 않는다 [v2 §11.3, 검토 R6].
 - FR-41: 판별력: 임계값별 AUC(Mann–Whitney, 동점 0.5)를 pooled f1–f4 대상일에서. `risk_check` 통과 = 보정 Brier < `Brier_climcond`, AUC ≥ 0.70, `bss_cond` > 0 (세 임계값 각각, q90은 합산으로만; 사건이 한 클래스뿐이면 BSS만). 미통과면 `discrimination_missing = true` `[v2 §11.3, A26]`.
 - FR-42: 사건 분류지표: 보정 확률에 \(p^*\) ∈ {0.5, 내부검증 F1 최대값(FR-55)}을 적용해 F1/precision/recall/FN/FP를 임계값별로. 대표 임계값 q90의 F1·FN·FP는 f1–f4 **합산 OOF**로 보고하고, fold별 값은 사건 수와 함께 적되 사건 0칸(f4 q90)은 NaN("정의 안 됨") `[v2 §4.5, §16.4, A24]`.
 - FR-43: `rolling_origin(model, panel, folds=("f1","f2","f3","f4"), variant)`: fold마다 train 역할로 한 번 적합, 검증일을 날짜순으로 발행(입력 이력은 매일 갱신, 파라미터 고정). 출력 `results/oof_slots.csv`(`fold, variant, model, date, datetime, y_true, is_missing, y_mean, y_median, q05…q95, state_filt, state_smooth`)와 `results/oof_days.csv`(`fold, variant, model, date, usable_peak, n_obs, M_true, M_hat_median, M_hat_mean, peak_slot_true, peak_time_mode, C50, C75, C90, risk_raw_C50/75/90, risk_platt_C50/75/90, risk_iso_C50/75/90, event_C50/75/90`) `[v2 §15.2]`.
-- FR-44: `results/metrics.csv`는 긴 형식 `model, variant, fold, stratum, metric, value, n`(fold ∈ f1–f4, `pooled`, `test`; stratum ∈ `all`, `op`, `nonop` — 08-16 공휴일 부분가동 같은 진짜 드문 날은 유지하고 가동·비가동 층으로 따로 본다 `[복사판정]`). metric 이름: `mae, rmse, crps, cov50, cov80, cov90, peak_mae, peak_hit2, brier_{raw|platt|iso}_C{50|75|90}, brier_mean_{raw|platt|iso}, brier_clim_C*, brier_climcond_C*, bss_cond_C*, auc_C*, f1_C*_{p05|pstar}, precision_*, recall_*, fn_*, fp_*, n_events_C*, nll`(`n_events_C*` = 사건 수, 모든 Brier·F1·AUC 표에 병기; `nll`은 HMM만) `[v2 §15.5, §16]`.
+- FR-44: results/metrics.csv는 model,variant,fold,stratum,metric,value,n 긴 형식이다. MAE/RMSE/CRPS/coverage/peak/Brier/AUC/F1/FN/FP/사건수와 HMM outer NLL을 보고한다. iso metric은 실행 시에만 존재한다. outer NLL은 fit 상태를 고정한 뒤 평가 단계에서 계산한다. 모든 Brier·F1·AUC 표는 지표별 유효 일수와 사건 수를 병기한다 [v2 §15.5, 검토 R6/R7].
 
 ### 4.6 기준선 (`gmst/baselines.py`)
 - FR-45: B0′ = d **이전 28일 이내**에서 같은 (`is_operating`, `daytype`)이고 로더가 목표를 가리지 않았으며 `n_missing == 0`인 가장 최근 날의 96점. 없으면 기간 제한 없이 같은 `is_operating`만 일치하는 가장 최근 이전 사용가능일. 미래 날짜 금지, 배열 음수 인덱스 참조 금지(참조 후보는 d보다 이른 날짜만) `[v2 §4.3, §15.4, A27, 판정 Q10]`.
@@ -400,35 +401,35 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 ### 4.7 보정·비교·선택 (`gmst/evaluate.py`)
 - FR-52: Platt: 위험을 [1/(2N), 1−1/(2N)] (N = 2,000)으로 클리핑, logit 위 2모수 로지스틱을 Newton법(numpy)으로 적합. 기본 보정법 `[v2 §11.3, A3, 수정-7]`.
 - FR-53: isotonic = PAV(numpy), ablation 전용 `[A3]`.
-- FR-54: fold j의 보정 확률은 나머지 3개 fold OOF로 적합한 보정함수로 계산. 테스트에는 f1–f4 전체 OOF로 적합한 보정함수를 한 번 적용. 모델×임계값별 `[v2 §11.3]`.
-- FR-55: \(p^*\) = **내부검증**(각 fold 학습구간의 마지막 7일, 그 fold의 실제 검증일은 쓰지 않음)에서 보정 확률의 고유값 후보 중 F1 최대값(임계값별), 0.5와 함께 보고 `[A24, 재검토 R10]`.
-- FR-56: f1–f4 검증창은 56일(각 14일)이지만, 메인평가 목표가 전부 가려진 suspect일 07-13·07-15 2일은 일 블록의 후보에서 뺀다 → **사용가능 OOF 일수 = 54일**(부분마스킹일 08-28·08-29는 포함; v2 부록A A13과 동일 정의) `[재계산]`. 이 54일을 일 블록으로 복원추출(B = 2,000, seed 0; 각 지표는 뽑힌 날들의 사용가능 점·일피크 대상일로 계산)하여 B4−B1의 ΔMAE, ΔCRPS, Δ평균Brier(보정)의 95% 백분위 CI, 그리고 oracle-weather ablation `AWstar − main`(B1)의 ΔMAE·Δ평균Brier CI. Diebold–Mariano(일 손실차, 정규근사, `math.erfc`) 보조. `results/bootstrap.csv`(`comparison, metric, delta, ci_lo, ci_hi, dm_stat, dm_p, n_days`) `[v2 §15.6, A13, A17, 재검토 R5]`.
-- FR-57: 성공 기준과 개선 루프(사용자 결정, B1은 벤치마크): 후보 B4 변형에 대해 ΔMAE와 Δ평균Brier(변형 − B1) **두** CI 상한이 **모두 < 0**이면 그 변형이 성공 기준을 만족한 것이다(`gate_pass`, FR-... US-008). 만족하면 그 변형을 제출(점예측·분위수·일 단위 열 모두 그 변형), 만족하지 못하면 FR-107–FR-110의 개선 루프(B4-H → B4-IO → B4-KAN)로 2026-10-03까지 최선의 변형을 찾는다(`select_variant`, US-021). ΔCRPS는 기록만 하고 판정에 쓰지 않는다(분위수 열은 CRPS/pinball로 평가). `results/selection.json` = `{submitted, gate_met, tried:[...], criteria:{mae|brier_mean:[delta, lo, hi]}, reported:{crps:[delta, lo, hi]}, remaining_gap_to_b1, tau, half_life, final_epochs, p_star, rule}`. **B1은 어떤 경우에도 제출되지 않는다.** 선택은 봉인 테스트 실행 전에 끝난다 `[v2 §5.2, §15.6, 판정 Q5, 검증 §5.4]`.
+- FR-54: 각 outer fold j의 보정함수는 **그 fold의 train 안에서만** 만든 보정용 날짜 예측에 적합한다. 유한 목표가 ≥1점인 train 일 n개를 날짜순으로 놓고, 최소 5일을 적합용으로 남긴다. 끝의 `min(7,max(0,n−10))`일은 보정·p*용, 그 직전 `min(7,max(0,n−보정일수−5))`일은 튜닝/early stopping용이다. 보정용 예측 모델은 보정일보다 앞선 train 날짜만으로 적합하며 보정일을 학습에 넣지 않는다. 튜닝 데이터가 비면 사전 고정 기본 격자값/epoch을, 보정 사건이 단일 클래스면 ridge Platt 상수확률을, 보정일이 비면 identity 보정과 p*=0.5를 사용하고 해당 상태·표본수를 기록한다. outer 검증 라벨은 보정 적합에 쓰지 않는다. 최종 09월 보정함수는 선택된 동일 `(model, variant)`의 09월 이전 f1–f4 OOF에 한 번 적합한다 `[v2 §11.3, 검토 R2/R3]`.
+- FR-55: p*는 각 fold train의 cal_idx 예측에서 보정 확률의 고유값 후보 중 F1 최대값(임계값별)으로 고르고 0.5와 병기한다. B0/B0′/BB와 모든 추가 변형도 실제 cal 예측을 만든다. p_star_table(inner,expected_keys)는 요구한 (model,variant,fold) 키를 모두 반환한다. 빈 cal은 p*=0.5와 default_empty/표본수 0을 명시한다 [A24, 검토 R3].
+- FR-56: f1–f4 검증창 56일 중 유한 목표가 ≥1점인 날을 day table과 마스크에서 도출한다. 현재 07-13·07-15 suspect 및 완전 마스킹 07-30을 제외한 53일이며, 부분마스킹 08-28·08-29는 포함한다. 일최대·Brier 등은 지표별 유효 분모를 별도로 보고한다. 이 날짜를 복원추출(B=2,000, seed 0)해 ΔMAE·ΔCRPS·Δ평균Brier의 95% CI와 AWstar ablation CI를 계산한다. 날짜 간 손실차 자기상관을 점검하고 유의하면 7일 이동블록 CI 민감도를 함께 보고한다. 단순 일손실 정규근사 통계는 DM 유사 보조지표로만 표기한다. 후보 선택 후 같은 OOF로 산출한 CI는 탐색적 개발 게이트이지 선택편향이 제거된 우월성 증거가 아니다 [v2 §15.6, A13, 검토 R5].
+- FR-57: B1은 100-round 기본값으로 고정한 벤치마크다. 후보 B4 변형−B1의 ΔMAE·Δ평균 Platt Brier 두 95% CI 상한이 모두 <0이면 개발 성공 기준을 만족한다. 이는 여러 후보를 같은 OOF로 고른 뒤 보고하는 탐색적 게이트이며 일반적 우월성의 확증이 아니다. 미달이면 H→IO→KAN을 2026-10-03까지 시도하고, 제출은 항상 선택된 B4 계열이다. selection.json에는 submitted_model=B4, submitted_variant, submitted ID, tried/count, 후보 상태, fold별·최종 τ/h와 IO/KAN 설정, final_epochs, p_star, 보정·컷 상태, 남은 B1 격차와 CI 한계를 기록한다. ΔCRPS는 보고만 한다 [v2 §5.2, §15.6, 검토 modeling-6].
 
 ### 4.8 백본 (`gmst/backbone.py`)
 - FR-58: 클래스 = (가동여부, 요일유형) 6개 × 96. 클래스의 사용가능일 < 5(`min_days`)이면 가동여부만으로 묶은 상위 클래스 프로파일로 대체 `[v2 §6, A5, A23]`.
 - FR-59: \(\hat s^{(c)} = (W_c + \tau C_2^\top C_2)^{-1} b_c\), \(C_2\)는 96차 순환 2차차분(행 q: \(s_{q-1} - 2s_q + s_{q+1}\), 인덱스 mod 96). 합=0 제약 없음(τ>0이고 W_c ≠ 0이면 양의 정부호, intrinsic GMRF 사전) `[v2 §6, 수정-2]`.
 - FR-60: 가중 \(w_t = 2^{-\Delta_t/h}\), 반감기 h ∈ {30, 60, 120}일(FR-61 격자), \(\Delta_t\) = fold 마지막 train 날짜로부터 경과일, 마스킹 점 w = 0 `[v2 §6, A6]`.
-- FR-61: 격자 τ {0.1, 1, 10, 100, 1000}(로그 간격; W_c 대각 = 클래스 가중 일수로 수십~100 규모라 τ/W가 약 1e-3~10을 덮음) × h {30, 60, 120} = 15조합, **내부검증**(각 fold 학습구간의 마지막 7일; 그 fold의 실제 f1–f4 검증일은 쓰지 않음) pooled BB MAE 최소 조합 선택, 테스트 적합(≤08-30 학습구간의 마지막 7일 내부검증)과 B1 행별 확장창 백본(A32)에도 같은 (τ, h). 최적값이 격자 끝이면 로그 경고 `[v2 §6, A6, 재검토 R10]`.
+- FR-61: τ {0.1,1,10,100,1000} × h {30,60,120}의 15조합에서 각 fold의 FR-54 튜닝일만으로 BB MAE 최소 조합을 별도로 고른다. (fold,tau,h,mae_tune,n_tune,status)를 기록하며 fold j의 선택에 다른 fold 자료를 합치지 않는다. 튜닝 유효점이 없으면 사전 기본값 (10,60)을 쓰고 status=default_empty로 남긴다. 최종 09월용 (τ,h)도 09월 이전 전체 train에서 같은 분리 절차로 별도 선택한다. B1 확장창 특징과 해당 fold의 BB/HMM은 그 fold의 선택값을 쓴다. 격자 끝 경고를 남긴다 [v2 §6, A6, 검토 R2].
 - FR-62: 백본은 fold마다 train 역할 날짜만으로 재적합. posterior sd는 입력에 쓰지 않음. 추세항 없음, \(\lambda_Q = 0\) `[v2 §6, §14]`.
 
 ### 4.9 조건부 HMM (`gmst/hmm.py`)
 - FR-63: 전이 특징 z: A+ 14차원 = sin/cos(2πrq/96) r=1..3 (6), op (1), op×sin/cos r=1,2 (4), 토, 일, hol (3). A 8차원(sin/cos 6 + 토 + 일). B 16차원 = A+ ⊕ [1(P>0), log(1+P)/10], P는 시간 생산량을 4슬롯 반복 `[v2 §8, A15, A20]`.
 - FR-64: \(A_t(i,j) = \mathrm{softmax}_j(b_{ij} + \theta_{ij}^\top z_t)\), 각 행의 \(j=i\) logit = 0 고정. B2는 θ ≡ 0(학습 안 함) `[v2 §8, §15.4]`.
 - FR-65: \(\mu_{t,k} = m_t + \delta_{k,op(t)}\), \(\delta_{1,\cdot} = \rho_{1,\cdot}\), \(\delta_{k,\cdot} = \delta_{k-1,\cdot} + \mathrm{softplus}(\rho_{k,\cdot})\); \(\sigma_{k,op} = 1 + \mathrm{softplus}(\cdot)\); \(\phi_k = \mathrm{sigmoid}(\psi_k)\)(B2·B3는 φ ≡ 0). emission 파라미터 5K `[v2 §9, A7, A25]`.
-- FR-66: 쌍 emission \(b_t(i,k) = N(Y_t;\ \mu_{t,k} + \phi_k(Y_{t-1} - \mu_{t-1,i}),\ \sigma^2_{k,op})\). \(Y_t\) 마스킹 → \(b \equiv 1\). \(Y_{t-1}\) 마스킹 또는 블록 첫 스텝 → \(N(Y_t;\ \mu_{t,k},\ \sigma^2_{k,op}/(1-\phi_k^2))\) `[v2 §9, A8, 수정-5]`.
+- FR-66: 쌍 emission은 직전 관측 잔차를 AR(1)로 전파한다. 현재 목표가 마스킹이면 우도 기여 0이다. 직전 관측이 없거나 블록 첫 스텝이면 정상분산 σ²/(1−φ²)으로 재시작하는 근사를 쓴다. 이전 관측의 잔차 기억을 전파하지 않으므로 정확한 결측 주변우도라 부르지 않는다. 단일상태 AR(1)의 1칸 결측 분석해 Y3|Y1: 평균 φ²Y1, 분산 σ²(1+φ²)와 비교해 근사 차이를 테스트·보고한다 [v2 §9, 검토 modeling-2].
 - FR-67: 스케일링 forward, \(\log p = \sum_h \log c_h\). 블록 시작 α = 첫 슬롯 전이행렬의 정상분포(선형해) `[v2 §10]`.
-- FR-68: 학습 = 2일 블록(warm-up d−1 + 목표 d), train 역할이면서 목표 사용가능점 ≥ 1이고 d−1이 존재하는 d마다 한 블록. 손실 = −(목표일 \(\sum \log c_h\)) / 사용가능점 수(관측 슬롯당 평균 NLL). \(\mathcal L_{balance}\) 없음. 점유 하한 \(\lambda_B \sum_k \max(0, \kappa - \bar\pi_k)^2\)(κ = 0.02, \(\lambda_B = 10\))은 기본 꺼짐(`occ_floor=False`)이고, US-012 3-seed 점검에서 점유율 < 0.02로 붕괴하는 상태가 나올 때만 켠다 `[v2 §14, A21]`. 전체배치 Adam lr 1e-2, ≤ 300 epoch, **내부검증**(해당 fold 학습구간의 마지막 7일, 같은 2일 블록 구조; 그 fold의 실제 검증일은 쓰지 않음) NLL patience 20, best epoch 기록. 테스트용 최종 적합(≤ 08-30) epoch = 같은 방식(≤08-30 학습구간 마지막 7일 내부검증)으로 고른 f1–f4 best epoch 중앙값 `[v2 §10, §14, A21, A22, 재검토 R10]`.
+- FR-68: 학습은 2일 블록(warm-up d−1 + 목표 d), 목표 사용가능점 ≥1인 train 일마다 한 블록, 관측 슬롯당 평균 NLL이다. Adam lr 1e-2, 최대 300 epoch, patience 20. 각 fold FR-54 튜닝일로 early stopping하고 전체 train을 고른 epoch만큼 재적합한다. 튜닝일이 없으면 사전 고정 epoch 100(전체)/20(smoke)을 사용하고 상태를 기록한다. 최종 09월도 pre-September train만으로 epoch을 결정한다. fit은 outer 검증 정답·NLL을 읽거나 반환하지 않는다. outer NLL은 예측 후 평가 단계에서 계산한다 [v2 §14, 검토 R7].
 - FR-69: 발행 시 \(\pi_{t_0|t_0}\) = d−1의 96슬롯 forward filter, 전부 마스킹이면 정상분포 `[v2 §8, A9]`.
 - FR-70: forward-backward로 filtered·smoothed 상태확률을 OOF에 기록(`state_filt`, `state_smooth` = argmax) `[v2 §13.1]`.
 - FR-71: MC: N = 2,000, 날짜별 고정 seed. \(S_0 \sim \pi_{t_0|t_0}\); \(e_0 = Y_{t_0} - \mu_{t_0,S_0}\), \(Y_{t_0}\) 마스킹이면 \(e_0 \sim N(0, \sigma^2_{S_0,op}/(1-\phi^2_{S_0}))\); \(S_h \sim A_h(S_{h-1},\cdot)\), \(e_h = \phi_{S_h} e_{h-1} + \sigma_{S_h,op}\varepsilon_h\), \(Y_h = \mu_{h,S_h} + e_h\) `[v2 §11.1, A10, 수정-5]`.
 - FR-72: B2·B3 위험 = 해석식 \(\pi\prod_h[A_h B_h(C)]\mathbf 1\), \(B_h\) = `torch.distributions.Normal.cdf` 대각 `[v2 §11.2]`.
-- FR-73: 사다리 기록 model ID: `B2`, `B3`, `B4`. 모든 확률 모델에 raw·Platt·isotonic 열을 계산 `[v2 §15.4]`.
-- FR-74: K ablation {2, 3, 4}(variant `K2`, `K4`; K3 = `main`) `[A4]`.
+- FR-73: 사다리 model ID는 B2, B3, B4. 모든 확률 모델에 raw·Platt 열을 계산한다. isotonic은 실행 시에만 iso 열/지표를 채우고, 컷되면 결과 상태를 not_run으로 남기며 점수 0으로 대체하지 않는다 [v2 §15.4, 검토 R6].
+- FR-74: K ablation은 K2와 선택적 K4(기본 K3=main); K4 컷 시 selection.json의 ablation 상태=not_run, 결과표는 미실행이며 K4 OOF 행을 요구하지 않는다 [A4, 검토 R6].
 - FR-75: 일 랜덤효과 ablation `re`(B4, MC 전용, A30, **진단 전용 — 개선 루프의 정식 단계 아님**): 경로마다 하루 한 번 \(u_d \sim N(0, \sigma_u^2)\)를 뽑아 96슬롯 전체에 더함. \(\sigma_u\) 초기값 = fold 학습 사용가능일의 일평균 잔차 \((Y-m)\) sd(가동여부별, \(s_{op}\)). 슬롯 잡음과의 재추정 방법은 v2가 정하지 않았으므로 PRD 기본값으로 적률 분해를 쓴다: 슬롯 정상분산 \(v = \sigma^2/(1-\phi^2)\)을 \(v' = \max(v - s^2_{op}, 1)\)로 줄여 \(\sigma' = \sqrt{v'(1-\phi^2)}\) (`# ponytail: 적률 분해로 σ 재추정, re 결과가 보고서 결론을 좌우하면 u_d를 넣은 우도로 재학습`). 항상 실행·보고하고, 판별력 미달의 원인 진단에만 쓴다. 개선 루프 자체는 FR-107–FR-110(B4-H·B4-IO·B4-KAN)을 따르며 B1로 되돌아가지 않는다(사용자 결정) `[v2 §11.5, A30, PRD]`.
 - FR-107: B4-H(사용자 결정, US-021): `CondHMM(emission_source="b1")`이면 \(m_t\)를 그 fold train 구간으로 적합한 B1의 fold-safe τ=0.5 슬롯 예측(A32)으로 치환한다. \(\delta,\sigma,\phi\)의 정의·제약은 FR-65와 동일, \(m_t\)만 대체(이중 사용 아님) `[v2 §9.6 ①, A34]`.
 - FR-108: B4-IO(사용자 결정 "Ruling (B4-IO spec)", US-021): `CondHMM(decoder="io")`이면 §9의 상수 \(\delta_{k,op},\sigma_{k,op},\phi_k\)를 13차원 입력 \(\mathbf u_t=[1,\mathrm{op}_d,\sin_{r=1},\cos_{r=1},\sin_{r=2},\cos_{r=2},\mathrm{op}_d\sin_{r=1},\mathrm{op}_d\cos_{r=1},\mathbb 1[\text{토}],\mathbb 1[\text{일}],\mathrm{hol}_d,\bar y_{d-1},y^{\max}_{d-1}]\)과 3차원 \(\mathbf v_t=[1,\sin_{r=1},\cos_{r=1}]\)의 시변 함수로 바꾼다: \(\delta_{t,1}=\mathbf a_1^\top\mathbf u_t\), \(\delta_{t,k}=\delta_{t,k-1}+\mathrm{softplus}(\mathbf a_k^\top\mathbf u_t)\), \(\mu_{t,k}=m_t+\delta_{t,k}\), \(\sigma_{t,k}=1+\mathrm{softplus}(\mathbf b_k^\top\mathbf u_t)\), \(\phi_{t,k}=\mathrm{sigmoid}(\mathbf c_k^\top\mathbf v_t)\). \(\bar y_{d-1}\)·\(y^{\max}_{d-1}\) = 전일 관측 슬롯의 \((Y-m)\) 평균·최댓값(관측 슬롯 0개면 0). K=3에서 파라미터 \(\mathbf a\)(3×13)+\(\mathbf b\)(3×13)+\(\mathbf c\)(3×3) = **87개**. 조화항·전일요약 계수에만 L2, \(\lambda\)는 R10 내부검증 선택 `[v2 §9.6 ②, A35]`.
-- FR-109: B4-KAN(사용자 결정, US-021): `z_features(kan=True)`이면 전이 특징의 sin/cos 조화항(6) + 가동×조화 교호(4) = 10차원을 제거하고, 가동여부별 주기(순환) 3차 B-스플라인 \(g(q,\mathrm{op})=\sum_{m=1}^{M}c_{\mathrm{op},m}B_m(q)\)(매듭 \(M\in\{8,12,16\}\), R10 내부검증 선택)를 전이 logit에 더한다. 0/1 플래그(토/일/공휴일/가동) 4차원은 선형 유지. 인접 매듭 계수에 매끄러움 벌점(순환), 벌점 강도도 같은 내부검증 격자에서 선택 `[v2 §9.6 ③, A36]`.
+- FR-109: B4-KAN 전이 특징은 가동여부별 주기 3차 B-스플라인 g(q,op)=Σ c(op,m) B_m(q), M∈{8,12,16}, 그리고 선형 플래그 토/일/공휴일 3개다. 별도 op 계수는 스플라인의 partition of unity와 중복이므로 제거한다. 특징 수는 2M+3, K=3·M=12 전이 모수는 162개(별도 intercept 없음). 순환 계수 차분 벌점과 강도는 해당 fold의 FR-54 튜닝일로 선택한다 [v2 §9.6 ③, A36, 검토 modeling-4].
 - FR-110: 개선 루프 오케스트레이션(사용자 결정): `select_variant`가 `main`(B4) → `H` → `IO` → `KAN` 순으로 US-008의 `gate_pass`를 판정하고, 하나라도 통과하면 그중 평균 OOF MAE 최솟값을, 2026-10-03까지 전부 미통과면 시도된 것 중 평균 OOF MAE 최솟값(동률 시 평균 Brier)을 최종 변형으로 정한다. B1은 후보에 없다. 결과는 `results/selection.json`에 시도 순서·게이트 결과·최종 선택·B1 대비 잔여 격차와 함께 기록된다 `[v2 §15.6, US-021]`.
 
 ### 4.10 기상 (외부자료 없음)
@@ -460,12 +461,12 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - FR-93: f4 B4 모델의 조건부 전이확률표 `[v2 §13.4]`.
 
 ### 4.13 러너·제출 (`gmst/run_all.py`)
-- FR-94: 단계 순서: ① preprocess ② splits ③ τ 선택 + f1–f4 OOF(B0, B0p, BB, B1, B2, B3, B4 + ablation) ④ 보정(OOF) ⑤ metrics ⑥ risk_check ⑦ bootstrap ⑧ **개선 루프**(FR-110의 `select_variant`: `gate_pass`가 미통과면 B4-H → B4-IO → B4-KAN을 f1–f4 OOF + R10 내부검증으로 순서대로 시도, 2026-10-03 중단 규칙) ⑨ selection.json ⑩ state_stability ⑪ analysis ⑫ scenarios ⑬ `unseal=True`로 ≤ 08-30 최종 적합(B0, B0p, B1, **선택된 B4 변형**) 및 09-01~09-14 발행 ⑭ test_predictions / eval_mask / test_metrics. B1은 제출되지 않으므로 조건부 모듈 파일 단계는 없다. 단계마다 이름·소요초·DEVICE를 stdout에 `[결정-코드, v2 §15.6, §9.6]`.
-- FR-95: ablation 행렬: `main`(전 모델); `copies`(완전+편집 복사 포함), `suspect`, `protoA`(B1, B4); `K2`, `K4`, `re`(B4); `AWstar`(B1, oracle-weather, 제출 금지); `B`(SCENARIO); 보정 none/Platt/isotonic은 열로 `[v2 §15.4, 수정-9]`.
+- FR-94: 러너 단계는 preprocess, splits, fold별 τ/h 및 OOF, 보정/p*, metrics(outer NLL 포함), risk_check, bootstrap, 개선 루프(신규 변형마다 보정·p*·지표 재계산), selection, state_stability, analysis, scenarios, final, submission 순서다. 기본/--no-final은 개발 단계까지만 실행한다. --smoke는 실제 봉인을 유지한 채 f4의 08-18..08-31 pseudo-test와 제출 스키마를 실행한다. 실제 --final만 selection.json 고정 뒤 unseal=True로 09-01..09-14를 한 번 평가한다. --smoke와 --final 동시 사용은 오류다. 제출 모델 ID와 variant는 최종 보정·p*·오류분석·FN/FP까지 같은 키로 전달한다 [v2 §15.6, 검토 R1/R3/R4/R7].
+- FR-95: ablation 행렬: main(전 모델), copies/suspect/protoA(B1·B4), K2/re(B4), AWstar(B1), B(SCENARIO), 선택적 K4(B4). isotonic도 선택적 보정 ablation이다. K4/isotonic 실행 여부를 selection.json과 결과 상태표에 run/not_run으로 기록한다. 컷된 항목의 행/열과 점수를 성공 실행처럼 요구하지 않는다 [v2 §15.4, 검토 R6].
 - FR-96: `results/test_predictions.csv`(UTF-8, 1,344행) 열 순서: `datetime, track, model, y_mean, y_median, q05, q10, q15, q20, q25, q30, q35, q40, q45, q50, q55, q60, q65, q70, q75, q80, q85, q90, q95, M_hat_median, M_hat_mean, peak_time_mode, risk_C50, risk_C75, risk_C90, C50, C75, C90`(33열). datetime `%Y.%m.%d %H:%M:%S`, `track = MAIN`, `model` = **`select_variant`가 정한 B4 변형 ID**(`B4`/`B4-H`/`B4-IO`/`B4-KAN` 중 하나, B1 아님), `peak_time_mode`는 `HH:MM`, 일 단위 값은 그날 96행 반복, 위험은 보정 후, M·위험은 96슬롯 전체 기준(발행시점엔 결측을 모름) `[v2 §4.5, A16, 수정-1, 수정-6, PRD]`.
 - FR-97: 평가 마스크 `results/eval_mask.csv`(`datetime, is_missing`, 1,344행 — 결측은 사후 정보라 예측파일과 분리)와 `results/test_metrics.csv`(metrics.csv 형식, fold `test`, 일피크는 관측슬롯 기준) `[v2 §4.5, §15.5, A16, 판정: v2 이름 우선]`.
 - FR-98: (삭제: 사용자 결정 — B1은 벤치마크로 고정, 제출은 항상 §15.6·FR-57·FR-110의 `select_variant`가 정한 B4 변형이므로 조건부 "B4 모듈 파일" 첨부는 없다. 번호는 참조 유지를 위해 비워 둔다) `[v2 §4.5, §15.6, A16, 사용자결정]`.
-- FR-99: `--smoke`: f4만, epoch·MC 경로·부트스트랩 반복을 최소로 줄여 같은 파일 집합을 만든다(테스트 전용) `[PRD]`.
+- FR-99: --smoke는 봉인 09-01..09-14를 읽지 않고 f4의 08-18..08-31 14일을 pseudo-test로 사용한다. epoch·MC·bootstrap 반복을 낮추되 제출 스키마/선택 변형 전달을 검사한다. 모든 smoke 예측 날짜는 ≤08-31이다. 실제 unseal=True는 명시적 최종 단계에서만 허용한다 [검토 R1, S2].
 - FR-100: `requirements.txt`는 `uv export --no-hashes --no-dev` 기반, 첫 줄 `--extra-index-url https://download.pytorch.org/whl/cu126` `[환경, 결정-대회]`.
 - FR-101: `README.md` 목차: 개요(문제정의 H/L/발행시각/C), 환경(`uv sync` 또는 `pip install -r requirements.txt`), 단일 명령, 산출물 표(파일 → 보고서 장), 데이터 주의점 요약(§2A 표의 처리 규칙), 제출파일 스키마와 `model` 열 의미, 외부자료(2021 공휴일·한전 요금표 하드코딩과 출처; 외부 기상 미사용과 그 근거인 oracle-weather 결과), 재현성(seed, CUDA/CPU), 폴더 구조, 제출 zip `[결정-대회, v2 §20, 사용자결정]`.
 - FR-102: `--package`: `dist/kamp_power_src.zip`에 `gmst/, tests/, notebooks/, results/, DATA의 CSV(원본·가공), requirements.txt, README.md, pyproject.toml, uv.lock`만. `.env`, `.venv/`, `document/`, `tasks/`, `claudedocs/`, `__pycache__/`, `dist/` 제외 `[결정-대회]`.
@@ -489,7 +490,7 @@ KAMP 제6회 경진대회 문제 ⑤(제조 생산데이터 기반 전력사용�
 - KMA 단기예보·ASOS 등 외부 기상자료 수집, 공장 위치(지점) 식별, 기상 예보 변형(A+W) `[사용자결정, v2 §4.7]`.
 - LightGBM 하이퍼파라미터 탐색(기본값 + ponytail 주석) `[PRD]`.
 - 다중 GPU/분산학습, 웹 UI·대시보드, 2021-09-14 이후 예측.
-- 결과보고서 PDF·발표자료 작성(이 PRD의 산출물을 입력으로 별도 작업).
+- 결과보고서 PDF·발표자료 작성(이 PRD의 산출물을 입력으로 별도 작업). 소프트웨어 범위 밖 별도 제출 인계는 v2 §20 및 구현 계획의 담당 역할·기한 체크리스트를 따른다.
 - `main.py`(uv 기본 스텁) 수정.
 - **컷 리스트**(일정이 밀리면 이 순서로 제외, 결과표에 "미실행" 기록) `[v2 §18, 판정 Q12]`: ① K = 4 ② isotonic 보정. B5 인코더는 컷 항목이 아니라 애초부터 비목표(위 R/INLA·TimeXer 항목)이므로 목록에 없다. 선택규칙(FR-57), 봉인 테스트, 누수 테스트, 제3·4장 분석, oracle-weather ablation은 자르지 않는다.
 
@@ -560,7 +561,7 @@ oracle-weather 결과(`metrics.csv`의 variant `AWstar`, `bootstrap.csv`의 `AWs
 
 - `uv run pytest -q` 전부 통과(GPU·CPU), `uv run python -m gmst.run_all` 종료코드 0.
 - G3의 재현수치가 소수 둘째 자리까지 일치.
-- 같은 장치에서 `run_all` 2회 실행 시 `test_predictions.csv`의 수치 열 최대 절대차 ≤ 1e-6.
+- 같은 장치에서 봉인 전 --smoke의 pseudo-test 예측을 2회 실행하면 수치 열 최대 절대차 ≤ 1e-6. 실제 09월 run_all 최종 실행은 선택 고정 후 1회이며 개발 재현성 확인을 위해 다시 열지 않는다.
 - 제출된 위험확률: 세 임계값 각각 보정 후 OOF Brier < 조건부 기후값 Brier, 날짜 간 AUC ≥ 0.70, BSS_cond > 0 (q90은 f1–f4 합산) `[A26]`. 미달이면 `risk_check.json`과 보고서에 그대로 기록(성공지표 미달로 표시).
 - oracle-weather ablation(`AWstar`)의 ΔMAE·Δ평균Brier CI가 `bootstrap.csv`에 있고 보고서 제2·3장에 외부 기상 제외 근거로 인용된다.
 - B1이 f1–f4 pooled MAE에서 B0′보다 낮음(아니면 B1 튜닝 트리거 발동, ponytail 원장에 기록).

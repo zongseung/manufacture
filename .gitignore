@@ -5,3 +5,7 @@ __pycache__/
 .ipynb_checkpoints/
 .sdd/
 .claude/worktrees/
+dist/
+*.log
+results_repro/
+results_smoke/

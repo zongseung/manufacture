@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "ipykernel>=7.3.0",
+    "lightgbm>=4.7.0",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "polars>=1.44.2",
@@ -20,3 +21,20 @@ torch = { index = "pytorch-cu126" }
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+# KAMP timestamps and historical tariff bands use local wall time without offsets.
+# Keep the prescribed CSV schema and date-only audit parsing timezone-naive.
+[tool.ruff.lint.per-file-ignores]
+"gmst/preprocess.py" = ["DTZ007"]
+"gmst/scenario.py" = ["DTZ001"]
+"tests/test_preprocess.py" = ["DTZ001"]
+"tests/test_scenario.py" = ["DTZ001"]
