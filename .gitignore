@@ -9,3 +9,9 @@ dist/
 *.log
 results_repro/
 results_smoke/
+/claudedocs/
+/docs/superpowers/plans/
+/docs/superpowers/specs/
+/document/*proposal*.md
+/tasks/
+/.omo/
