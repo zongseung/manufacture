@@ -30,21 +30,8 @@ P_MIN: Final = 0.95
 
 
 def draw_curves(state: bat.BATState, panel: Panel, d: int, plans: FloatArray) -> FloatArray:
-    """(m, S, 96) kW per posterior draw s for m raw plans: idle_k + γ_k·ref + Σ_c w_c,k α(θ_k) x_c(q).
-
-    Full formula for any plan: both the on/off and the log-volume channel follow the plan, and the
-    operating type k is the plan's own (a shifted block keeps k; dropping an hour may change it).
-    """
-    plans = np.atleast_2d(plans)
-    _, ref, _ = bat._day_parts(state, panel, d)
-    out = np.empty((len(plans), len(state["theta"]), 96))
-    for i, q in enumerate(plans):
-        k = int(bat.kinds({"X": {"생산량": np.repeat(q[None], 4, 1)}}, np.array([0]))[0])  # type: ignore[arg-type]
-        alpha = np.array([bat.attention(th[k]) for th in state["theta"]])  # (S, 96, 24)
-        x = bat.channels(q, state["q_scale"])  # (2, 24)
-        base = state["idle"][:, k] + state["gam"][:, k, None] * ref
-        out[i] = (base + np.einsum("sc,sth,ch->st", state["w"][:, :, k], alpha, x)) * state["scale"]
-    return out
+    """(m, S, 96) kW per posterior draw for m raw plans (full formula: on/off and volume follow the plan)."""
+    return np.stack([bat.plan_curves(state, panel, d, q) for q in np.atleast_2d(plans)])
 
 
 def robust_stats(y0: FloatArray, y1: FloatArray, mask: BoolArray, rate: FloatArray) -> dict[str, float | bool]:
@@ -272,10 +259,10 @@ def run_shift_fold(fold: str, n_iter: int, max_days: int | None = None, seed: in
             S = len(state["theta"])
             # 실행 오차: 두 계획 모두 같은 분포에서 독립적으로 실현된다 (가동 여부는 바뀌지 않음)
             noise = lambda: np.exp(sigma * rng.standard_normal((S, 24)))  # noqa: E731
-            y0 = draw_curves_exec(state, panel, d, q, noise())
+            y0 = bat.plan_curves(state, panel, d, q[None] * noise())
             best = None
             for name, q1 in cands:
-                st = robust_stats(y0, draw_curves_exec(state, panel, d, q1, noise()), mask, rate)
+                st = robust_stats(y0, bat.plan_curves(state, panel, d, q1[None] * noise()), mask, rate)
                 row = {"fold": fold, "date": str(day), "kind": k, "sigma": sigma, "plan": name,
                        "n_candidates": len(cands), "labor_index": float(labor @ q1 / (labor @ q)), "chosen": False} | st
                 rows.append(row)
@@ -285,17 +272,6 @@ def run_shift_fold(fold: str, n_iter: int, max_days: int | None = None, seed: in
                 best["chosen"] = True
     print(f"[ch4-shift] {fold}: {len(days)} days", flush=True)
     return rows
-
-
-def draw_curves_exec(state: bat.BATState, panel: Panel, d: int, q: FloatArray, mult: FloatArray) -> FloatArray:
-    """(S, 96): draw s uses posterior draw s with the plan realised as q·mult[s] (execution error)."""
-    _, ref, _ = bat._day_parts(state, panel, d)
-    qs = q[None] * mult
-    k = int(bat.kinds({"X": {"생산량": np.repeat(q[None], 4, 1)}}, np.array([0]))[0])  # type: ignore[arg-type]
-    alpha = np.array([bat.attention(th[k]) for th in state["theta"]])
-    x = bat.channels(qs, state["q_scale"])  # (2, S, 24)
-    base = state["idle"][:, k] + state["gam"][:, k, None] * ref
-    return (base + np.einsum("sc,sth,csh->st", state["w"][:, :, k], alpha, x)) * state["scale"]
 
 
 def shift_summary(rows: pl.DataFrame) -> str:

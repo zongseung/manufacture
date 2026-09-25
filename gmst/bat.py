@@ -79,6 +79,12 @@ def kinds(panel: Panel, days: IntArray) -> IntArray:
     return parent[group[:, 0]] if len(days) else np.zeros(0, np.int64)
 
 
+def kind_of(q: FloatArray) -> int:
+    """Operating type of one hourly plan (24,)."""
+    group, parent = groups_from_plan(np.atleast_2d(q))
+    return int(parent[group[0, 0]])
+
+
 def channels(q_raw: FloatArray, q_scale: float) -> FloatArray:
     """(…, 24) raw plan → (2, …, 24): on/off and log-volume, both non-decreasing in q."""
     q = np.nan_to_num(q_raw)
@@ -214,14 +220,25 @@ def transfer_draws(state: BATState, panel: Panel, d: int) -> tuple[FloatArray, F
     The on/off channel is a step in q, so the gradient only sees the log-volume channel; the
     re-scheduler keeps the operating window (rule R2), so on/off only changes at window edges.
     """
-    k, ref, _ = _day_parts(state, panel, d)
-    x = channels(panel["X"]["생산량"][d, ::4], state["q_scale"])  # (2, 24)
-    alpha = np.array([attention(th[k]) for th in state["theta"]])  # (S, 96, 24)
-    w = state["w"][:, :, k]  # (S, 2)
-    mean = state["idle"][:, k] + state["gam"][:, k, None] * ref + np.einsum("sc,sth,ch->st", w, alpha, x)
     q = np.nan_to_num(panel["X"]["생산량"][d, ::4])
+    k = kind_of(q)
+    alpha = np.array([attention(th[k]) for th in state["theta"]])  # (S, 96, 24)
     dlog = 1.0 / ((1.0 + q) * np.log1p(state["q_scale"]))
-    return mean * state["scale"], w[:, 1, None, None] * alpha * dlog * state["scale"]
+    return plan_curves(state, panel, d, q), state["w"][:, 1, k, None, None] * alpha * dlog * state["scale"]
+
+
+def plan_curves(state: BATState, panel: Panel, d: int, q: FloatArray) -> FloatArray:
+    """(S, 96) kW: posterior draw s evaluated at plan q (24,) or per-draw plans q (S, 24).
+
+    Both channels follow the plan; the operating type k is the plan's own (per-draw plans must
+    share one on/off pattern, e.g. a plan times positive execution noise)."""
+    q = np.broadcast_to(q, (len(state["theta"]), 24))
+    k = kind_of(q[0])
+    _, ref, _ = _day_parts(state, panel, d)
+    alpha = np.array([attention(th[k]) for th in state["theta"]])  # (S, 96, 24)
+    x = channels(q, state["q_scale"])  # (2, S, 24)
+    base = state["idle"][:, k] + state["gam"][:, k, None] * ref
+    return (base + np.einsum("sc,sth,csh->st", state["w"][:, :, k], alpha, x)) * state["scale"]
 
 
 def curve_fn(state: BATState, panel: Panel, d: int) -> Callable[[torch.Tensor], torch.Tensor]:
