@@ -6,23 +6,48 @@
 
 매일 **00:00**에 당일 96개 15분 슬롯의 전력을 예측합니다. 입력은 **당일 시간별 생산계획**, 달력(요일·공휴일·가동 여부), 그리고 d일 이전의 관측 전력뿐입니다. 생산량은 데이터상 실적이지만 사전에 알려진 생산계획으로 가정합니다. 이 가정은 보고서에 명시합니다.
 
-제안 모델 **BAT(Bayesian Attention Transfer)**:
+제안 모델 **BAT(Bayesian Attention Transfer)** 는 날짜 $d$의 슬롯 $t\,(=1,\dots,96)$ 전력을 다음과 같이 둡니다.
 
-```
-y_{d,t} = μ_{k,t} + γ_k·ref_{d,t} + Σ_c w_{c,k} Σ_h α_{t,h}(θ_k) x_c(q_{d,h}) + ε
-```
+$$
+y_{d,t} \;=\; \mu_{k,t} \;+\; \gamma_k\, r_{d,t} \;+\; \sum_{c\in\{\mathrm{on},\,\log\}} w_{c,k} \sum_{h=0}^{23} \alpha_{t,h}(\theta_k)\, x_c(q_{d,h}) \;+\; \varepsilon_{d,t},
+\qquad \varepsilon_{d,t} \sim \mathrm{Laplace}(0,\, b)
+$$
 
-| 항 | 의미 |
+어텐션은 슬롯 $t$와 생산 시각 $h$의 시간 거리 $\Delta_{t,h}$(시간 단위)에 대한 일반화 가우시안 점수를 sparsemax로 정규화합니다.
+
+$$
+\alpha_{t,h}(\theta) \;=\; \operatorname{sparsemax}_h\!\left(-\,\frac{\lvert \Delta_{t,h} - c \rvert^{\beta}}{\sigma}\right),
+\qquad \theta = (\sigma,\, \beta,\, c)
+$$
+
+생산 채널은 가동 여부와 로그 생산량입니다.
+
+$$
+x_{\mathrm{on}}(q) = \mathbf{1}[\,q > 0\,], \qquad
+x_{\log}(q) = \frac{\log(1+q)}{\log(1+q_{\max})}, \qquad
+w_{c,k} = e^{\omega_{c,k}} > 0
+$$
+
+| 기호 | 의미 |
 |---|---|
-| k | 생산계획에서 정한 가동유형 (하루 생산시간 0 / 1–12 / 13–19 / 20h 이상) |
-| μ_{k,t} | 가동유형별 기본곡선 (순환 RW2 평활 사전) |
-| ref | 최근 같은 가동·날짜유형 완전일의 곡선 (B0′ 기준일) |
-| α_{t,h}(θ) | 슬롯 t가 생산 시간 h를 보는 **sparsemax 국소 어텐션**. 폭 σ, 모양 β, 지연 c를 사후분포로 추정 |
-| x_c | 생산 채널 2개 (가동 on/off, log 생산량) |
-| w > 0 | 생산 이득. 양수라서 생산이 늘면 전력이 줄지 않음 (단조) |
-| ε | Laplace 우도, 반감기 30일 가중 |
+| $k$ | 생산계획에서 정한 가동유형 (하루 생산시간 0 / 1–12 / 13–19 / 20시간 이상) |
+| $\mu_{k,t}$ | 가동유형별 기본곡선. 순환 2차 확률보행(RW2) 평활 사전 |
+| $r_{d,t}$ | 최근 같은 가동·날짜유형 완전일의 곡선 (B0′ 기준일) |
+| $\alpha_{t,h}(\theta_k)$ | 슬롯 $t$가 생산 시각 $h$를 보는 희소 국소 어텐션. 폭 $\sigma$, 모양 $\beta$, 지연 $c$를 사후분포로 추정 |
+| $w_{c,k}$ | 생산 이득. $w>0,\ \alpha\ge 0$ 이므로 생산이 늘면 예측 전력이 줄지 않음 (단조) |
+| $b$ | Laplace 척도. 우도에는 반감기 30일의 시간 가중 $2^{-(d_{\max}-d)/30}$ 적용 |
 
-추정은 Gibbs(선형 블록) + Metropolis(θ, log w)로 합니다. 예측 경로는 사후 draw마다 평균곡선에 날짜 공통 이동과 하루 안 AR(1) 잡음(Laplace 혁신)을 더해 만듭니다. 분위수, 일 피크, 피크 초과 확률은 모두 같은 경로에서 계산합니다. 전달행렬 ∂ŷ/∂q(96×24)는 해석(3장)과 생산 재배치(4장)에 씁니다.
+**추정.** Laplace 오차를 정규–지수 척도 혼합으로 풀어 $(\mu, \gamma)$는 Gibbs(가중 정규방정식)로, $(\theta_k, \omega_k)$는 랜덤워크 Metropolis로 뽑습니다(2,000회, 앞 1,000회 버림).
+
+**예측분포.** 사후 표본 $s$마다 평균곡선 $\hat y^{(s)}_{d,t}$에 날짜 공통 이동과 하루 안 AR(1) 잡음을 더해 경로를 만듭니다.
+
+$$
+\tilde y^{(s)}_{d,t} \;=\; \hat y^{(s)}_{d,t} + u^{(s)} + e^{(s)}_t,
+\qquad u^{(s)} \sim \mathcal N\!\big(0, \sigma_u^{2}\big),
+\qquad e^{(s)}_t = \rho\, e^{(s)}_{t-1} + \eta_t,\ \ \eta_t \sim \mathrm{Laplace}(0, b_\eta)
+$$
+
+점예측은 경로의 중앙값이고, 분위수·일 피크·피크 초과 확률 $P(\max_t \tilde y_{d,t} > C)$도 같은 경로에서 계산합니다. 전달행렬 $\partial \hat y / \partial q \in \mathbb R^{96\times 24}$는 해석(3장)과 생산 재배치(4장)에 씁니다.
 
 비교 사다리: **B0**(지난주 같은 요일) → **M2**(생산계획 포함 LightGBM, `baselines.b1_model(protocol="B")`) → **BAT**.
 
@@ -94,24 +119,49 @@ uv run python -m gmst.realloc_v3 --shift      # 4장 분포 기반 시간대 이
 
 ## 생산 재배치 (4장)
 
-재배치 전략은 두 가지이며, 둘 다 BAT 사후분포로 권고 여부를 판정합니다(P(피크 감소) ≥ 0.95일 때만 권고).
+두 전략 모두 BAT 사후 표본으로 새 계획 $q'$의 일 피크를 계산해, 다음 조건을 만족할 때만 권고합니다.
+
+$$
+P\!\left(\max_{t\in\mathcal D} \hat y_t(q') \;<\; \max_{t\in\mathcal D} \hat y_t(q)\right) \;\ge\; 0.95
+$$
+
+$\mathcal D$는 기본요금 산정 대상인 중간·최대부하 시간대 슬롯입니다.
 
 ### 1) 생산량 재배치 (`gmst/reallocate.py`, `python -m gmst.realloc_v3`)
 가동 시각은 그대로 두고 생산량만 옮깁니다.
-- **목적함수:** 최대수요 항(중간·최대부하 시간대의 smooth-max × 기본요금/30) + 시간대별 전력량요금 + w × 인건비 할증 배수 × 생산량
-- **규칙:** R1 일 총생산 보존, R2 기존 가동 구간 안에서만 이동, R3 시간당 상한(학습기간 시간대별 95분위), R4 이동량 ≤ ρ × 일 총생산, R6 날짜 간 이동 없음
-- **풀이:** Adam 경사 단계 뒤마다 Dykstra 교대 투영(박스·초평면 ∩ L1 공). 새 계획이 원래 계획보다 비싸면 원래 계획을 돌려줍니다.
+
+$$
+\min_{q'}\;\; \lambda_D\, \mathrm{LSE}_\tau\!\big(\hat y(q')_{\mathcal D}\big) \;+\; \sum_{t} 0.25\, p_t\, \hat y_t(q') \;+\; w \sum_{h} \ell_h\, q'_h
+$$
+
+$$
+\text{s.t.}\quad \sum_h q'_h = \sum_h q_h,\qquad
+0 \le q'_h \le \bar q_h,\qquad
+q'_h = q_h\ \ (h \notin \text{가동 구간}),\qquad
+\tfrac12\lVert q' - q \rVert_1 \le \rho \sum_h q_h
+$$
+
+- $\mathrm{LSE}_\tau(x) = \tau \log \sum_t e^{x_t/\tau}$는 미분 가능한 최대값, $\lambda_D$는 기본요금/30(원/kW·일), $p_t$는 시간대별 전력량 단가, $\ell_h$는 인건비 할증 배수(1.0/1.5), $\bar q_h$는 학습기간 시간대별 95분위입니다.
+- 풀이: Adam 경사 단계 뒤마다 Dykstra 교대 투영(박스·초평면 $\cap$ $L_1$ 공). 새 계획이 원래보다 비싸면 원래 계획을 돌려줍니다.
 
 ### 2) 분포 기반 시간대 이동 (`python -m gmst.realloc_v3 --shift`)
-가동 시각 자체를 옮깁니다. 용어는 `CONTEXT.md`를 따릅니다.
-- **계획 분포(학습 fold별 추정):**
-  - 블록 시작 시각 | 가동유형 ~ 범주형 + Dirichlet(0.5) 사전
-  - 가동 시각의 시간당 생산량 | 주간(07–20시)·야간 ~ Gamma(적률 적합). KS 통계량은 Gamma 0.043, 로그정규 0.095, 지수 0.133
-- **후보 계획:**
-  - 블록 전체를 ±1–2시간 이동. 새 시작 시각의 사후예측확률이 5% 이상이어야 함
-  - 단가가 높은 시각의 생산을 더 싼 인접 가동 시각으로 이동. 이동 후 생산량이 해당 시간대 Gamma 95분위 이하여야 함
-- **실행 오차:** 실제 생산 = 계획 × LogNormal(0, σ), σ ∈ {0.05, 0.1, 0.2} 민감도
-- **선택:** 기준을 통과한 후보 중 기대 요금이 가장 낮은 계획
+가동 시각 자체를 옮깁니다. 용어는 `CONTEXT.md`를 따릅니다. 학습 fold마다 다음 분포를 추정합니다.
+
+$$
+S \mid k \;\sim\; \mathrm{Categorical}(\pi_k),\qquad \pi_k \sim \mathrm{Dirichlet}(0.5\cdot\mathbf 1 + n_k)
+$$
+
+$$
+q_h \mid q_h>0,\ \text{시간대}\ b \;\sim\; \mathrm{Gamma}(a_b,\, \lambda_b),\qquad b \in \{\text{주간 07–20시},\ \text{야간}\}
+$$
+
+$S$는 가동 블록의 시작 시각, $n_k$는 가동유형 $k$의 시작 시각 관측 빈도입니다. 시간당 생산량의 KS 통계량은 Gamma 0.043, 로그정규 0.095, 지수 0.133입니다.
+
+- **후보 계획**
+  - 블록 전체를 $\pm1$–$2$시간 이동. 새 시작 시각의 사후예측확률 $P(S=s' \mid k) \ge 0.05$
+  - 단가가 높은 시각의 생산을 더 싼 인접 가동 시각으로 이동. 이동 후 $q'_h \le F^{-1}_{\mathrm{Gamma}(a_b,\lambda_b)}(0.95)$
+- **실행 오차:** $q^{\mathrm{real}}_h = q'_h \cdot \exp(\sigma z_h),\ z_h \sim \mathcal N(0,1)$, $\sigma \in \{0.05, 0.1, 0.2\}$로 민감도 확인
+- **선택:** 권고 조건을 통과한 후보 중 기대 요금이 가장 낮은 계획
 
 ### 결과 (검증기간 가동일, 모델 기반 반사실 추정)
 
