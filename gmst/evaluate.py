@@ -17,7 +17,7 @@ FOLDS_CV: Final = ("f1", "f2", "f3", "f4")
 CS: Final = ("C50", "C75", "C90")
 KEYS: Final = ["model", "variant", "fold"]
 SLOT_COLS: Final = ["fold", "variant", "model", "date", "datetime", "y_true", "is_missing",
-                    "y_mean", "y_median", *QCOLS, "state_filt", "state_smooth"]
+                    "y_mean", "y_median", *QCOLS]
 DAY_COLS: Final = ["fold", "variant", "model", "date", "usable_peak", "n_obs", "M_true",
                    "M_hat_median", "M_hat_mean", "peak_slot_true", "peak_time_mode", *CS,
                    *[f"risk_{m}_{c}" for m in ("raw", "platt") for c in CS],
@@ -43,30 +43,6 @@ class Calibration(TypedDict):
     params: FloatArray
     status: str
     n_cal: int
-
-
-class Climatology(TypedDict):
-    base: FloatArray
-    cond: dict[tuple[int, int], FloatArray]
-    op: dict[int, FloatArray]
-
-
-class Candidate(TypedDict):
-    mae: float
-    brier_mean: float
-    gate_met: bool
-    gap: dict[str, list[float]]
-
-
-class Selection(TypedDict):
-    submitted: str
-    model: str
-    variant: str
-    gate_met: bool
-    tried: list[str]
-    remaining_gap_to_b1: dict[str, list[float]]
-    n_candidates_run: int
-    caveat: str
 
 
 def _mean(values: FloatArray) -> tuple[float, int]:
@@ -195,28 +171,19 @@ def rolling_origin[S](model: Model[S], panel: Panel, folds: Sequence[str] = FOLD
         fitted[fold] = state
         identity = model["name"], variant, fold
         outer_idx = ft.role_idx(panel, fold, "test" if fold == "test" else "val")
-        first_row = len(days)
         for d in sorted(outer_idx):
             d = int(d)
             pred = model["predict"](state, panel, d)
             days.append(_day_row(pred, panel, d, identity, C))
             quantiles = pred["q"]
             q = quantiles if quantiles is not None else np.full((19, 96), np.nan)
-            filtered, smooth = (model["posthoc"](state, panel, d) if "posthoc" in model
-                                else (np.full(96, np.nan), np.full(96, np.nan)))
             start = datetime.combine(panel["dates"][d], time())
             slots.append(pl.DataFrame({"fold": [fold] * 96, "variant": [variant] * 96,
                 "model": [model["name"]] * 96, "date": [start.strftime("%Y.%m.%d")] * 96,
                 "datetime": [(start + timedelta(minutes=15 * j)).strftime("%Y.%m.%d %H:%M:%S") for j in range(96)],
                 "y_true": panel["Y"][d], "is_missing": panel["is_missing"][d],
                 "y_mean": pred["y_mean"], "y_median": pred["y_median"],
-                **{c: q[j] for j, c in enumerate(QCOLS)},
-                "state_filt": pl.Series(filtered).fill_nan(None).cast(pl.Int64),
-                "state_smooth": pl.Series(smooth).fill_nan(None).cast(pl.Int64)}))
-        if "evaluate_nll" in model:
-            for offset, d in enumerate(sorted(outer_idx)):
-                nll, count = model["evaluate_nll"](state, panel, np.array([d], dtype=np.int64))
-                days[first_row + offset].update(nll=nll, n_nll=count)
+                **{c: q[j] for j, c in enumerate(QCOLS)}}))
         cal_idx = ft.inner_idx(panel, fold)
         inner_state = model["inner_state"](state)
         if len(cal_idx) and inner_state is None:
@@ -224,11 +191,11 @@ def rolling_origin[S](model: Model[S], panel: Panel, folds: Sequence[str] = FOLD
         if inner_state is not None:
             inner.extend(_day_row(model["predict"](inner_state, panel, int(d)), panel, int(d), identity, C) for d in cal_idx)
     day_frame = pl.DataFrame(days, schema_overrides=_empty_days().schema) if days else _empty_days()
-    day_frame = day_frame.select(*DAY_COLS, *(["nll", "n_nll"] if "nll" in day_frame.columns else []))
+    day_frame = day_frame.select(*DAY_COLS)
     inner_frame = pl.DataFrame(inner, schema=_empty_days().schema) if inner else _empty_days()
     slot_schema: dict[str, type[pl.DataType]] = {c: pl.Float64 for c in SLOT_COLS}
     slot_schema.update({c: pl.String for c in (*KEYS, "date", "datetime")})
-    slot_schema.update({"is_missing": pl.Boolean, "state_filt": pl.Int64, "state_smooth": pl.Int64})
+    slot_schema.update({"is_missing": pl.Boolean})
     return pl.concat(slots) if slots else pl.DataFrame(schema=slot_schema), day_frame, fitted, inner_frame
 
 
@@ -429,53 +396,10 @@ def dm_test(d: FloatArray) -> tuple[float, float]:
     return statistic, erfc(abs(statistic) / sqrt(2))
 
 
-def p_star_status(inner: pl.DataFrame | None, expected_keys: Iterable[GroupKey]) -> pl.DataFrame:
-    rows: list[dict[str, Cell]] = []
-    for key in expected_keys:
-        group = inner.filter(_group_filter(key) & pl.col("usable_peak")) if inner is not None else _empty_days()
-        for c in CS:
-            valid = np.isfinite(group[f"risk_platt_{c}"].to_numpy()) & np.isfinite(group[f"event_{c}"].to_numpy())
-            events = group[f"event_{c}"].to_numpy()[valid]
-            n = int(valid.sum())
-            rows.append({**dict(zip(KEYS, key, strict=True)), "threshold": c, "n_cal": n,
-                         "status": "default_empty" if not n else "single_class" if np.unique(events).size == 1 else "ok"})
-    return pl.DataFrame(rows)
-
-
-def climatology(M: FloatArray, op: IntArray, dtype: IntArray, C: FloatArray) -> Climatology:
-    valid = np.isfinite(M)
-    maxima, op, dtype = M[valid], op[valid], dtype[valid]
-    events = (maxima[:, None] > C).astype(float)
-    base = events.mean(axis=0) if len(events) else np.full(3, np.nan)
-    return Climatology(base=base,
-        cond={(int(o), int(t)): events[(op == o) & (dtype == t)].mean(axis=0)
-              for o, t in np.unique(np.column_stack((op, dtype)), axis=0)},
-        op={int(o): events[op == o].mean(axis=0) for o in np.unique(op)})
-
-
-def clim_prob(clim: Climatology, op: int, dtype: int) -> FloatArray:
-    return clim["cond"].get((op, dtype), clim["op"].get(op, clim["base"]))
-
-
 def _with_op(frame: pl.DataFrame, panel: Panel) -> pl.DataFrame:
     calendar = pl.DataFrame({"date": [d.strftime("%Y.%m.%d") for d in panel["dates"]],
                              "op_true": panel["op"], "dtype": panel["dtype"]})
     return frame.drop("op_true", "dtype", strict=False).with_columns(_date_expr()).join(calendar, on="date", how="left", validate="m:1")
-
-
-def add_climatology(days: pl.DataFrame, panel: Panel) -> pl.DataFrame:
-    """Attach each fold's train-only base and operating/daytype event rates."""
-    outputs: list[pl.DataFrame] = []
-    for key, group in _with_op(days, panel).partition_by(KEYS, as_dict=True, maintain_order=True).items():
-        idx = ft.role_idx(panel, str(key[2]), "train")
-        idx = idx[ft.usable_peak(panel)[idx]]
-        C = np.asarray(group.select(CS).row(0), dtype=float)
-        clim = climatology(obs_max(panel["Y"][idx], np.isfinite(panel["Y"][idx])),
-                           panel["op"][idx].astype(np.int64), panel["dtype"][idx].astype(np.int64), C)
-        conditional = np.stack([clim_prob(clim, int(o), int(t)) for o, t in group.select("op_true", "dtype").iter_rows()])
-        outputs.append(group.with_columns(*[pl.lit(clim["base"][j]).alias(f"clim_{c}") for j, c in enumerate(CS)],
-                                          *[pl.Series(f"climcond_{c}", conditional[:, j]) for j, c in enumerate(CS)]))
-    return pl.concat(outputs, how="diagonal_relaxed") if outputs else _with_op(days, panel)
 
 
 def _groups(frame: pl.DataFrame) -> Iterator[tuple[GroupKey, str, pl.DataFrame]]:
@@ -511,79 +435,8 @@ def point_metrics(slots: pl.DataFrame, days: pl.DataFrame, panel: Panel) -> pl.D
         events = usable.select([f"event_{c}" for c in CS]).to_numpy()
         valid = np.isfinite(risk).all(axis=1) & np.isfinite(events).all(axis=1)
         metrics["brier_mean_raw"] = _mean(((risk[valid] - events[valid]) ** 2).mean(axis=1))
-        if "nll" in group.columns:
-            nll, n = group["nll"].to_numpy(), group["n_nll"].to_numpy()
-            valid = np.isfinite(nll) & (n > 0)
-            count = int(n[valid].sum())
-            metrics["nll"] = (float(np.sum(nll[valid] * n[valid]) / count) if count else float("nan")), count
         rows.extend((*key, stratum, name, value, n) for name, (value, n) in metrics.items())
     return pl.DataFrame(rows, schema=METRIC_SCHEMA, orient="row")
-
-
-def risk_metrics(days: pl.DataFrame, panel: Panel, p_star: Mapping[GroupKey, Mapping[str, float]]) -> pl.DataFrame:
-    for key in days.select(KEYS).unique().iter_rows():
-        identity = str(key[0]), str(key[1]), str(key[2])
-        for c in CS:
-            if identity not in p_star or c not in p_star[identity]:
-                raise KeyError(f"Missing p* for {identity}/{c}")
-    prepared = add_climatology(days, panel)
-    for c in CS:
-        prepared = prepared.with_columns(pl.Series(f"pstar_{c}", [p_star[(str(m), str(v), str(f))][c]
-                                         for m, v, f in prepared.select(KEYS).iter_rows()]))
-    rows: list[tuple[str, str, str, str, str, float, int]] = []
-    for key, stratum, group in _groups(prepared):
-        group = group.filter(pl.col("usable_peak"))
-        metrics: dict[str, tuple[float, int]] = {}
-        for method in ("platt", "iso"):
-            if method == "iso" and "isotonic_status" in prepared.columns and not group.filter(pl.col("isotonic_status") == "ok").height:
-                continue
-            if all(f"risk_{method}_{c}" in group.columns for c in CS):
-                p = group.select([f"risk_{method}_{c}" for c in CS]).to_numpy()
-                e = group.select([f"event_{c}" for c in CS]).to_numpy()
-                valid = np.isfinite(p).all(axis=1) & np.isfinite(e).all(axis=1)
-                metrics[f"brier_mean_{method}"] = _mean(((p[valid] - e[valid]) ** 2).mean(axis=1))
-                for j, c in enumerate(CS):
-                    metrics[f"brier_{method}_{c}"] = brier(p[:, j], e[:, j]), int((np.isfinite(p[:, j]) & np.isfinite(e[:, j])).sum())
-        for c in CS:
-            p, e = group[f"risk_platt_{c}"].to_numpy(), group[f"event_{c}"].to_numpy()
-            valid = np.isfinite(p) & np.isfinite(e)
-            n = int(valid.sum())
-            conditional = group[f"climcond_{c}"].to_numpy()
-            paired = valid & np.isfinite(conditional)
-            bs = brier(p[paired], e[paired])
-            bc = brier(conditional[paired], e[paired])
-            metrics[f"bss_cond_{c}"] = (1 - bs / bc if bc > 0 else float("nan")), int(paired.sum())
-            for kind in ("clim", "climcond"):
-                values = group[f"{kind}_{c}"].to_numpy()
-                metrics[f"brier_{kind}_{c}"] = brier(values, e), int((np.isfinite(values) & np.isfinite(e)).sum())
-            for threshold, cutoffs in (("p05", np.full(len(p), 0.5)), ("pstar", group[f"pstar_{c}"].to_numpy())):
-                counts = prf(p[valid] >= cutoffs[valid], e[valid].astype(bool))
-                for name in ("precision", "recall", "f1", "fn", "fp"):
-                    metrics[f"{name}_{c}_{threshold}"] = float(counts[name]), n
-        rows.extend((*key, stratum, name, value, n) for name, (value, n) in metrics.items())
-    return pl.DataFrame(rows, schema=METRIC_SCHEMA, orient="row")
-
-
-def risk_check(days: pl.DataFrame) -> dict[str, dict[str, dict[str, float | int | bool] | bool]]:
-    result: dict[str, dict[str, dict[str, float | int | bool] | bool]] = {}
-    valid_days = days.filter(pl.col("fold").is_in(FOLDS_CV))
-    for key, rows in valid_days.partition_by(["model", "variant"], as_dict=True, maintain_order=True).items():
-        rows = rows.filter(pl.col("usable_peak"))
-        checks: dict[str, dict[str, float | int | bool] | bool] = {}
-        passes: list[bool] = []
-        for c in CS:
-            p, e, baseline = (rows[name].to_numpy() for name in (f"risk_platt_{c}", f"event_{c}", f"climcond_{c}"))
-            valid = np.isfinite(p) & np.isfinite(e) & np.isfinite(baseline)
-            p, e, baseline = p[valid], e[valid], baseline[valid]
-            bs, bc, area = brier(p, e), brier(baseline, e), auc(p, e)
-            skill = 1 - bs / bc if bc > 0 else float("nan")
-            passed = bool(skill > 0 and (np.unique(e).size == 1 or area >= 0.7))
-            passes.append(passed)
-            checks[c] = {"brier": bs, "brier_climcond": bc, "auc": area, "bss_cond": skill,
-                         "n_events": int(e.sum()), "n_days": len(e), "pass": passed}
-        checks["discrimination_missing"] = not all(passes)
-        result[f"{key[0]}/{key[1]}"] = checks
-    return result
 
 
 def day_losses(slots: pl.DataFrame, days: pl.DataFrame, panel: Panel) -> pl.DataFrame:
@@ -666,24 +519,3 @@ def compare(slots_a: pl.DataFrame, days_a: pl.DataFrame, slots_b: pl.DataFrame, 
                        "block7_ci_lo": block_lo, "block7_ci_hi": block_hi,
                        "block7_status": "ok" if correlated else "not_indicated", "exploratory": True})
     return output
-
-
-def gate_pass(boot: pl.DataFrame, comparison: str) -> bool:
-    rows = boot.filter((pl.col("comparison") == comparison) & pl.col("metric").is_in(["mae", "brier_mean"]))
-    return rows.height == 2 and rows["metric"].n_unique() == 2 and all(np.isfinite(rows["ci_hi"].to_numpy()) & (rows["ci_hi"].to_numpy() < 0))
-
-
-def select_variant(candidates: Mapping[str, Candidate]) -> Selection:
-    if not candidates or set(candidates) - {"main", "H", "IO", "KAN"}:
-        raise ValueError("Selection requires attempted B4-family candidates only")
-    finite = {v: c for v, c in candidates.items() if np.isfinite(c["mae"])}
-    if not finite:
-        raise ValueError("No B4 candidate has finite OOF MAE")
-    passed = {v: c for v, c in finite.items() if c["gate_met"]}
-    pool = passed or finite
-    winner = min(pool, key=lambda v: (pool[v]["mae"], pool[v]["brier_mean"] if np.isfinite(pool[v]["brier_mean"]) else np.inf))
-    chosen = candidates[winner]
-    return Selection(submitted="B4" if winner == "main" else f"B4-{winner}", model="B4", variant=winner,
-                     gate_met=chosen["gate_met"], tried=list(candidates), remaining_gap_to_b1=chosen["gap"],
-                     n_candidates_run=len(candidates),
-                     caveat="Exploratory development CIs after candidate selection; repeated candidates do not establish unbiased superiority.")

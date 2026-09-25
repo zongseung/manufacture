@@ -35,7 +35,7 @@ def test_production_code_has_no_banned_imports_or_credentials() -> None:
                 assert not set(names) & {"scipy", "sklearn", "pandas", "requests"}, path
             if isinstance(node, ast.ImportFrom):
                 assert (node.module or "").split(".")[0] not in {"scipy", "sklearn", "pandas", "requests"}, path
-            if isinstance(node, ast.Call) and path.name != "run_all.py":
+            if isinstance(node, ast.Call) and path.name != "run_v3.py":
                 assert not any(keyword.arg == "unseal" and isinstance(keyword.value, ast.Constant)
                                and keyword.value.value is True for keyword in node.keywords), path
 

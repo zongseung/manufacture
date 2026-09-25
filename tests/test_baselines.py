@@ -62,7 +62,6 @@ def test_b1_quantiles_daily_peaks_and_classifier_fallback() -> None:
     assert len(state["q"]) == len(state["Mq"]) == 19
     assert state["clf"][2] is None
     assert pred["risk_raw"][2] == 0
-    np.testing.assert_array_equal(bl.predict_slot_median(state, p, np.array([35]))[0], pred["y_median"])
 
 
 def test_b1_forecast_ignores_same_day_targets_and_weather() -> None:
@@ -76,24 +75,6 @@ def test_b1_forecast_ignores_same_day_targets_and_weather() -> None:
     np.testing.assert_array_equal(actual["y_mean"], expected["y_mean"])
     np.testing.assert_array_equal(actual["q"], expected["q"])
     np.testing.assert_array_equal(actual["risk_raw"], expected["risk_raw"])
-
-
-def test_hybrid_uses_cross_fitted_19_quantile_median_and_sealed_fit_inputs() -> None:
-    p = synthetic_panel(35)
-    tr = np.arange(25)
-    C = np.array([100., 120., 140.])
-    centre, state = bl.b1_centre_state(p, tr, 10., 60, C, rounds=2)
-    in_sample = bl.b1_centre(p, tr, 10., 60, C, rounds=2, n_blocks=1)
-    full = bl.fit_b1(p, tr, "A+", (10., 60), C, rounds=2)
-    np.testing.assert_array_equal(in_sample[25], bl.predict_b1(full, p, 25)["y_median"])
-    assert len(state["q"]) == 19
-    assert np.isfinite(centre).all()
-    assert not np.array_equal(centre[tr], in_sample[tr])
-    p["Y"][25:] = 9000
-    for values in p["X"].values():
-        values[25:] = 8000
-    perturbed, _ = bl.b1_centre_state(p, tr, 10., 60, C, rounds=2)
-    np.testing.assert_array_equal(perturbed, centre)
 
 
 def test_oracle_weather_changes_forecast_when_weather_drives_target() -> None:
@@ -121,13 +102,3 @@ def test_b1_inner_fit_ends_before_calibration_and_ignores_outer_labels() -> None
         values[30:] = 8000
     changed = model["fit"](p, "f1", C)
     assert changed["mean"].model_to_string() == state["mean"].model_to_string()
-
-
-def test_hybrid_cross_fit_centre_ignores_its_own_target() -> None:
-    p = synthetic_panel(35)
-    tr = np.arange(25)
-    C = np.array([100., 120., 140.])
-    original = bl.b1_centre(p, tr, 10., 60, C, rounds=10)
-    p["Y"][10] += 1000
-    perturbed = bl.b1_centre(p, tr, 10., 60, C, rounds=10)
-    np.testing.assert_array_equal(perturbed[10], original[10])

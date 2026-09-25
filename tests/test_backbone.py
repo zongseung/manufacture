@@ -78,14 +78,3 @@ def test_tau_empty_tuning_uses_registered_default() -> None:
     tau, h, table = bb.select_tau(p, "f1")
     assert (tau, h) == (10., 60)
     assert table["status"].to_list() == ["default_empty"] * 15
-
-
-def test_bb_calibration_state_excludes_calibration_dates() -> None:
-    from gmst.features import inner_idx
-
-    p = synthetic_panel()
-    model = bb.bb_model(10., 60)
-    state = model["fit"](p, "f1", np.array([110., 130., 150.]))
-    inner = model["inner_state"](state)
-    assert inner is not None
-    assert inner["train_idx"].max() < inner_idx(p, "f1").min()

@@ -2,7 +2,6 @@ from typing import Final, NotRequired, TypedDict
 
 import lightgbm as lgb
 import numpy as np
-import polars as pl
 
 from gmst import backbone as bb
 from gmst.contracts import FloatArray, IntArray, Model, Panel, Prediction
@@ -70,19 +69,6 @@ def b0_model() -> Model[NaiveState]:
     return {"name": "B0", "fit": fallback["fit"], "predict": predict, "inner_state": lambda state: state}
 
 
-def lag7_skip_table(panel: Panel) -> pl.DataFrame:
-    from gmst.evaluate import FOLDS_CV, mae
-    from gmst.features import role_idx
-
-    rows: list[tuple[str, float, int]] = []
-    for fold in FOLDS_CV:
-        days = role_idx(panel, fold, "val")
-        days = days[days >= 7]
-        value, n = mae(panel["Y"][days], panel["Y"][days - 7])
-        rows.append((fold, value, n))
-    return pl.DataFrame(rows, schema=["fold", "mae", "n"], orient="row")
-
-
 def _slot_data(
     panel: Panel, train_idx: IntArray, protocol: str, backbone: tuple[float, int],
 ) -> tuple[FloatArray, FloatArray, list[str]]:
@@ -99,24 +85,6 @@ def _slot_data(
 
 def _quantile_boosters(data: lgb.Dataset, rounds: int) -> list[lgb.Booster]:
     return [lgb.train({**LGB_PARAMS, "objective": "quantile", "alpha": float(q)}, data, num_boost_round=rounds) for q in QUANTILES]
-
-
-def fit_slot_quantiles(
-    panel: Panel, train_idx: IntArray, protocol: str, backbone: tuple[float, int], rounds: int = 100,
-) -> SlotState:
-    X, y, names = _slot_data(panel, train_idx, protocol, backbone)
-    boosters = _quantile_boosters(lgb.Dataset(X, y, free_raw_data=False), rounds)
-    return {"tau": backbone[0], "h": backbone[1], "protocol": protocol, "rounds": rounds,
-            "names": names, "n_rows": len(y), "train_idx": train_idx.copy(), "q": boosters}
-
-
-def predict_slot_median(state: SlotState, panel: Panel, day_idx: IntArray) -> FloatArray:
-    from gmst.features import lgbm_rows
-
-    m = bb.asof_matrix(panel, day_idx, state["tau"], state["h"], state["protocol"])
-    X, _, _ = lgbm_rows(panel, day_idx, state["protocol"], m)
-    q = np.sort(np.array([booster.predict(X) for booster in state["q"]]), axis=0)
-    return q[9].reshape(len(day_idx), 96)
 
 
 def fit_b1(
@@ -179,37 +147,3 @@ def b1_model(tau: float, half_life: int, protocol: str = "A+", rounds: int = 100
         return state
 
     return {"name": "B1", "fit": fit, "predict": predict_b1, "inner_state": lambda state: state.get("inner_state")}
-
-
-def b1_centre_state(
-    panel: Panel, train_idx: IntArray, tau: float, half_life: int, C: FloatArray,
-    protocol: str = "A+", rounds: int = 100, n_blocks: int = 5,
-) -> tuple[FloatArray, SlotState]:
-    """Return fit-safe centres and the reusable issue-time slot predictor."""
-    if n_blocks < 1 or not len(train_idx):
-        message = "Hybrid centres require training days and a positive block count"
-        raise ValueError(message)
-    tr = np.sort(train_idx)
-    fit_panel: Panel = {**panel, "Y": panel["Y"].copy(), "X": {key: values.copy() for key, values in panel["X"].items()}}
-    fit_panel["Y"][tr[-1] + 1:] = np.nan
-    for values in fit_panel["X"].values():
-        values[tr[-1] + 1:] = np.nan
-    state = fit_slot_quantiles(fit_panel, tr, protocol, (tau, half_life), rounds)
-    centre = predict_slot_median(state, fit_panel, np.arange(len(panel["dates"])))
-    if n_blocks > 1:
-        # ponytail: 학습일 중심은 5개 연속 블록 교차적합, 시간순 확장창이 필요하면 일별 as-of 재적합 (v2 §9.6 ①)
-        for block in np.array_split(tr, n_blocks):
-            if len(block):
-                other = np.setdiff1d(tr, block)
-                training_panel: Panel = {**fit_panel, "Y": fit_panel["Y"].copy()}
-                training_panel["Y"][block] = np.nan
-                fitted = fit_slot_quantiles(training_panel, other, protocol, (tau, half_life), rounds)
-                centre[block] = predict_slot_median(fitted, fit_panel, block)
-    return centre, state
-
-
-def b1_centre(
-    panel: Panel, train_idx: IntArray, tau: float, half_life: int, C: FloatArray,
-    protocol: str = "A+", rounds: int = 100, n_blocks: int = 5,
-) -> FloatArray:
-    return b1_centre_state(panel, train_idx, tau, half_life, C, protocol, rounds, n_blocks)[0]
