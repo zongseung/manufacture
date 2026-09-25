@@ -60,6 +60,24 @@ def rmse(y: FloatArray, yhat: FloatArray) -> tuple[float, int]:
     return sqrt(value), n
 
 
+def r2(y: FloatArray, yhat: FloatArray) -> tuple[float, int]:
+    valid = np.isfinite(y) & np.isfinite(yhat)
+    y, yhat = y[valid], yhat[valid]
+    total = float(np.sum((y - y.mean()) ** 2)) if y.size >= 2 else 0.0
+    return (float(1 - np.sum((y - yhat) ** 2) / total) if total > 0 else float("nan")), int(y.size)
+
+
+def bias(y: FloatArray, yhat: FloatArray) -> tuple[float, int]:
+    valid = np.isfinite(y) & np.isfinite(yhat)
+    return _mean(yhat[valid] - y[valid])
+
+
+def wape(y: FloatArray, yhat: FloatArray) -> tuple[float, int]:
+    valid = np.isfinite(y) & np.isfinite(yhat)
+    total = float(np.abs(y[valid]).sum())
+    return (float(100 * np.abs(yhat[valid] - y[valid]).sum() / total) if total > 0 else float("nan")), int(valid.sum())
+
+
 def crps(y: FloatArray, Q: FloatArray) -> tuple[float, int]:
     valid = np.isfinite(y) & np.isfinite(Q).all(axis=1)
     delta = y[valid, None] - Q[valid]
@@ -417,7 +435,9 @@ def point_metrics(slots: pl.DataFrame, days: pl.DataFrame, panel: Panel) -> pl.D
     rows: list[tuple[str, str, str, str, str, float, int]] = []
     for key, stratum, group in _groups(_with_op(slots, panel)):
         y, median, mean = (group[c].to_numpy() for c in ("y_true", "y_median", "y_mean"))
-        metrics = {"mae": mae(y, median), "rmse": rmse(y, mean), "crps": crps(y, group.select(QCOLS).to_numpy())}
+        metrics = {"mae": mae(y, median), "rmse": rmse(y, mean), "r2": r2(y, mean),
+                   "bias": bias(y, mean), "wape_pct": wape(y, median),
+                   "crps": crps(y, group.select(QCOLS).to_numpy())}
         for name, lo, hi in (("cov50", "q25", "q75"), ("cov80", "q10", "q90"), ("cov90", "q05", "q95")):
             metrics[name] = coverage(y, group[lo].to_numpy(), group[hi].to_numpy())
         rows.extend((*key, stratum, name, value, n) for name, (value, n) in metrics.items())
@@ -425,6 +445,9 @@ def point_metrics(slots: pl.DataFrame, days: pl.DataFrame, panel: Panel) -> pl.D
         usable = group.filter(pl.col("usable_peak"))
         metrics = {"peak_mae": peak_mae(usable["M_true"].to_numpy(), usable["M_hat_median"].to_numpy()),
                    "peak_hit2": peak_hit(usable["peak_slot_true"].to_numpy(), usable["peak_time_mode"].to_numpy())}
+        truth, mean, median = (usable[c].to_numpy() for c in ("M_true", "M_hat_mean", "M_hat_median"))
+        metrics.update(peak_rmse=rmse(truth, mean), peak_r2=r2(truth, mean),
+                       peak_bias=bias(truth, mean), peak_wape_pct=wape(truth, median))
         for c in CS:
             p, e = usable[f"risk_raw_{c}"].to_numpy(), usable[f"event_{c}"].to_numpy()
             valid = np.isfinite(p) & np.isfinite(e)

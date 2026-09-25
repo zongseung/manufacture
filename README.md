@@ -1,5 +1,30 @@
 # KAMP 공장 전력 예측·피크 저감 (v3: 베이지안 어텐션 전달모형)
 
+## 기본 예측 모델: 고정 시간 반응의 조건부 BAT
+
+기본 모델은 `BAT_conditional_gaussian_fixed_attention`입니다. 시간 반응의 폭·모양·지연은
+기존 사전 중심값(1.5, 2, 0)으로 고정하고, 생산 이득과 비가동일/가동일의 조건부 잡음은 계속 학습합니다.
+기존 Laplace BAT 실행은 과거 비교용으로 유지합니다.
+
+```bash
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=1 \
+uv run python -m gmst.run_conditional --n-iter 6000 --burn 3000
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 POLARS_MAX_THREADS=1 \
+uv run python -m gmst.rescore
+```
+
+기본 학습 결과는 `results_v3/conditional_fixed/`, 재채점 결과는 그 아래 `metrics/`에 저장됩니다.
+비교 기준 예측은 저장소에 있는 `results_v3/`에서 읽습니다. 다른 기준 예측은 `--source`로 지정합니다.
+기본 실행은 f1–f4와 시드 0/1/2를 사용하며 9월을 새로 열지 않습니다.
+
+- `--attention-ablation`: 조건부 학습형/고정형을 함께 재학습하여 비교합니다.
+- `--pooled-noise-comparison`: 과거의 학습 어텐션 공통/조건부 잡음 비교를 재현합니다.
+- 두 비교 옵션을 생략하면 고정형 조건부 모델만 새로 학습합니다.
+- Python API는 `ConditionalConfig()`가 고정형이며, 과거 학습형은 `fixed_attention=False`로 명시합니다.
+
+6,000회 비교에서 고정형은 전체 피크 MAE 8.93kW(학습형 9.16), 슬롯 MAE 8.50kW(학습형 8.34)였습니다.
+피크 분석용 단순화 선택이며, 모든 지표의 개선이나 실제 일정 변경 후 절감을 뜻하지 않습니다.
+
 제6회 K-인공지능 제조데이터 분석 경진대회 문제 ⑤ *제조 생산데이터 기반 전력사용량 예측 및 최대피크 위험조건 분석*.
 
 ## 개요

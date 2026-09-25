@@ -14,7 +14,8 @@ from gmst.bat import bat_model
 from gmst.contracts import Model
 
 LADDER = ("B0", "M2", "BAT")
-SUMMARY = ["mae", "rmse", "crps", "cov50", "cov80", "cov90", "peak_mae", "peak_hit2", "brier_mean_raw"]
+SUMMARY = ["mae", "rmse", "r2", "bias", "wape_pct", "crps", "cov50", "cov80", "cov90",
+           "peak_mae", "peak_rmse", "peak_r2", "peak_bias", "peak_wape_pct", "peak_hit2", "brier_mean_raw"]
 
 
 def _asof[S](model: Model[S]) -> Model[S]:

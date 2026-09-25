@@ -27,7 +27,7 @@ PRIOR_SD: Final = np.array([0.5, 0.5, 1.0, 1.5, 1.5])
 STEP: Final = np.array([0.15, 0.15, 0.3, 0.1, 0.1])
 
 
-class BATState(TypedDict):
+class BATMeanState(TypedDict):
     scale: float
     q_scale: float
     kind_mean: FloatArray  # (4, 96) scaled, fallback reference curve
@@ -35,6 +35,9 @@ class BATState(TypedDict):
     gam: FloatArray  # (S, 4)
     w: FloatArray  # (S, 2, 4) channels on/log × kind
     theta: FloatArray  # (S, 4, 5)
+
+
+class BATState(BATMeanState):
     sigma_u: FloatArray  # (S,)
     lam: FloatArray  # (S,)
     rho: FloatArray  # (S,) within-day AR(1) coefficient of residuals
@@ -208,13 +211,13 @@ def fit_bat(panel: Panel, train_idx: IntArray, C: FloatArray, n_iter: int = 2000
             **{key: np.array(v) for key, v in out.items()}}  # type: ignore[typeddict-item]
 
 
-def _day_parts(state: BATState, panel: Panel, d: int) -> tuple[int, FloatArray, FloatArray]:
+def _day_parts(state: BATMeanState, panel: Panel, d: int) -> tuple[int, FloatArray, FloatArray]:
     k = int(kinds(panel, np.array([d]))[0])
     ref = _ref(panel, np.array([d]), np.array([k]), state["kind_mean"], state["scale"])[0]
     return k, ref, np.nan_to_num(panel["X"]["생산량"][d, ::4]) / state["q_scale"]
 
 
-def transfer_draws(state: BATState, panel: Panel, d: int) -> tuple[FloatArray, FloatArray]:
+def transfer_draws(state: BATMeanState, panel: Panel, d: int) -> tuple[FloatArray, FloatArray]:
     """Posterior mean curves (S, 96) at the day's plan and log-channel transfer ∂ŷ/∂q (S, 96, 24), kW.
 
     The on/off channel is a step in q, so the gradient only sees the log-volume channel; the
@@ -227,7 +230,7 @@ def transfer_draws(state: BATState, panel: Panel, d: int) -> tuple[FloatArray, F
     return plan_curves(state, panel, d, q), state["w"][:, 1, k, None, None] * alpha * dlog * state["scale"]
 
 
-def plan_curves(state: BATState, panel: Panel, d: int, q: FloatArray) -> FloatArray:
+def plan_curves(state: BATMeanState, panel: Panel, d: int, q: FloatArray) -> FloatArray:
     """(S, 96) kW: posterior draw s evaluated at plan q (24,) or per-draw plans q (S, 24).
 
     Both channels follow the plan; the operating type k is the plan's own (per-draw plans must
@@ -241,7 +244,7 @@ def plan_curves(state: BATState, panel: Panel, d: int, q: FloatArray) -> FloatAr
     return (base + np.einsum("sc,sth,csh->st", state["w"][:, :, k], alpha, x)) * state["scale"]
 
 
-def curve_fn(state: BATState, panel: Panel, d: int) -> Callable[[torch.Tensor], torch.Tensor]:
+def curve_fn(state: BATMeanState, panel: Panel, d: int) -> Callable[[torch.Tensor], torch.Tensor]:
     """Posterior-mean curve ŷ(q), differentiable in the raw (24,) plan (on/off held at the day's plan)."""
     k, ref, _ = _day_parts(state, panel, d)
     on = torch.tensor(channels(panel["X"]["생산량"][d, ::4], state["q_scale"])[0])
