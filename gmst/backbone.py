@@ -1,5 +1,5 @@
 """Weighted cyclic RW2 profiles and fold-local tuning."""
-from typing import Final, NotRequired, TypedDict
+from typing import Final
 
 import numpy as np
 import polars as pl
@@ -9,22 +9,13 @@ from gmst.contracts import (
     FlagArray,
     FloatArray,
     IntArray,
-    Model,
     Panel,
-    Prediction,
 )
 
 C2: Final = np.roll(np.eye(96), 1, axis=1) - 2 * np.eye(96) + np.roll(np.eye(96), -1, axis=1)
 PENALTY: Final = C2.T @ C2
 TAU_GRID: Final = (0.1, 1.0, 10.0, 100.0, 1000.0)
 H_GRID: Final = (30, 60, 120)
-
-
-class BackboneState(TypedDict):
-    m: FloatArray
-    C: FloatArray
-    train_idx: IntArray
-    inner_state: NotRequired["BackboneState"]
 
 
 def fit_backbone(
@@ -119,20 +110,3 @@ def select_tau(panel: Panel, fold: str, train_idx: IntArray | None = None) -> tu
     if tau in (TAU_GRID[0], TAU_GRID[-1]) or h in (H_GRID[0], H_GRID[-1]):
         print(f"backbone grid edge: tau={tau} h={h}")
     return tau, h, table
-
-
-def bb_model(tau: float, half_life: int, protocol: str = "A+") -> Model[BackboneState]:
-    from gmst.evaluate import point_pred
-    from gmst.features import inner_idx, role_idx
-
-    def fit(panel: Panel, fold: str, C: FloatArray) -> BackboneState:
-        tr = role_idx(panel, fold, "train")
-        cal = inner_idx(panel, fold)
-        before = tr[tr < cal[0]] if cal.size else tr
-        inner: BackboneState = {"m": fold_backbone(panel, before, tau, half_life, protocol), "C": C, "train_idx": before}
-        return {"m": fold_backbone(panel, tr, tau, half_life, protocol), "C": C, "train_idx": tr, "inner_state": inner}
-
-    def predict(state: BackboneState, panel: Panel, d: int) -> Prediction:
-        return point_pred(state["m"][d], state["C"])
-
-    return {"name": "BB", "fit": fit, "predict": predict, "inner_state": lambda state: state.get("inner_state")}

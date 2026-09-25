@@ -42,6 +42,4 @@ class Model[S](TypedDict):
     name: str
     fit: Callable[[Panel, str, FloatArray], S]
     predict: Callable[[S, Panel, int], Prediction]
-    posthoc: NotRequired[Callable[[S, Panel, int], tuple[IntArray, IntArray]]]
     inner_state: Callable[[S], S | None]
-    evaluate_nll: NotRequired[Callable[[S, Panel, IntArray], tuple[float, int]]]

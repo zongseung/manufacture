@@ -1,15 +1,12 @@
 """Descriptive OOF diagnostics retaining each model and variant identity."""
 from collections.abc import Mapping, Sequence
 from datetime import date
-from typing import TYPE_CHECKING, Final, TypedDict, assert_never
+from typing import Final, TypedDict, assert_never
 
 import numpy as np
 import polars as pl
 
-from gmst.contracts import FloatArray, IntArray, Panel
-
-if TYPE_CHECKING:
-    from gmst.hmm import HMMState
+from gmst.contracts import FloatArray, Panel
 
 type Selection = str | tuple[str, str]
 type PStars = Mapping[tuple[str, str, str], Mapping[str, float]]
@@ -94,19 +91,9 @@ def error_by_condition(slots: pl.DataFrame, panel: Panel, models: Sequence[Selec
         part = part.join(qctx, on=["date", "q"]).join(context, on="date").with_columns(
             (pl.col("y_median") - pl.col("y_true")).alias("error"), (pl.col("q") // 4).cast(pl.String).alias("hour"))
         conditions = ["production", "temperature", "operating", "daytype", "hour", "holiday_adjacent"]
-        for state in ("state_filt", "state_smooth"):
-            if state in part.columns:
-                next_state = pl.col(state).shift(-1).over("date")
-                next_q = pl.col("q").shift(-1).over("date")
-                part = part.with_columns(pl.when((pl.col(state) >= 0) & (next_state >= 0) & (next_q == pl.col("q") + 1))
-                    .then(pl.when(pl.col(state) != next_state).then(pl.lit("transition")).otherwise(pl.lit("stable")))
-                    .alias(f"{state}_transition"))
-                conditions.extend([state, f"{state}_transition"])
         part = part.filter(pl.col("error").is_finite())
         for condition in conditions:
             eligible = part.filter(pl.col(condition).is_not_null())
-            if condition in ("state_filt", "state_smooth"):
-                eligible = eligible.filter(pl.col(condition) >= 0)
             frames.append(eligible.group_by(condition).agg(pl.len().cast(pl.Int64).alias("n"),
                 pl.col("error").abs().mean().alias("mae"), (pl.col("error") ** 2).mean().sqrt().alias("rmse"))
                 .rename({condition: "bin"}).with_columns(pl.col("bin").cast(pl.String), pl.lit(model).alias("model"),
@@ -114,12 +101,12 @@ def error_by_condition(slots: pl.DataFrame, panel: Panel, models: Sequence[Selec
     return pl.concat(frames).sort(["model", "variant", "condition", "bin"]) if frames else pl.DataFrame(schema=ERROR_SCHEMA)
 
 
-def fn_fp(days: pl.DataFrame, panel: Panel, p_star: PStars, models: Sequence[Selection] | None = None,
+def fn_fp(days: pl.DataFrame, panel: Panel, p_star: PStars, models: Sequence[Selection],
           variants: Sequence[str] | None = None) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Classify each usable OOF day at .5 and its own variant/fold p*; compare FN/FP conditions."""
     context = _context(panel).drop("operating")
     frames: list[pl.DataFrame] = []
-    for model, variant in _pairs(models or ("B4", "B1"), variants):
+    for model, variant in _pairs(models, variants):
         part = days.filter((pl.col("model") == model) & (pl.col("variant") == variant) & pl.col("usable_peak"))
         if part.is_empty():
             continue
@@ -150,75 +137,3 @@ def fn_fp(days: pl.DataFrame, panel: Panel, p_star: PStars, models: Sequence[Sel
                     n_all, n = int((bins == label).sum()), int(((bins == label) & subset).sum())
                     rows.append((*key, kind, condition, label, n, n / subset.sum() if subset.any() else float("nan"), n_all, n_all / part.height))
     return daily, pl.DataFrame(rows, schema=SUMMARY_SCHEMA, orient="row")
-
-
-def _diagnostic_features(panel: Panel, idx: IntArray, holdout: IntArray) -> FloatArray:
-    from gmst.backbone import asof_matrix
-    from gmst.features import lgbm_rows
-
-    masked: Panel = {**panel, "Y": panel["Y"].copy()}
-    masked["Y"][holdout] = np.nan
-    return lgbm_rows(masked, idx, "A+", asof_matrix(masked, idx, 10.0, 60))[0]
-
-
-def leakage_gap(panel: Panel | None = None, num_boost_round: int = 100,
-                max_groups: int | None = None) -> pl.DataFrame:
-    """Compare random-day and event-held-out L2 diagnostics on identical pre-September slots.
-
-    A supplied panel must include copies. This retrospective split comparison is
-    a leakage diagnostic, not the forward forecast's validation performance.
-    Held-out targets are masked in all training and validation features,
-    including historical lags and the as-of backbone; scoring targets stay intact.
-    """
-    import lightgbm as lgb
-
-    from gmst.baselines import LGB_PARAMS
-    from gmst.features import load_panel
-
-    if num_boost_round < 1 or (max_groups is not None and max_groups < 1):
-        raise ValueError(f"Expected positive rounds/groups: rounds={num_boost_round}, groups={max_groups}")
-    panel = load_panel(include_copies=True) if panel is None else panel
-    idx = np.array([d for d, day in enumerate(panel["dates"]) if day <= date(2021, 8, 31)
-                    and np.isfinite(panel["Y"][d]).any()], dtype=np.int64)
-    event: list[str] = panel["days"]["event_id"].to_list()
-    groups = list(dict.fromkeys(event[d] for d in idx))
-    selected = set(groups if max_groups is None else groups[:max_groups])
-    score_days = np.array([d for d in idx if event[d] in selected], dtype=np.int64)
-    schema = {"split": pl.String, "mae": pl.Float64, "n": pl.Int64, "n_days": pl.Int64,
-              "n_splits": pl.Int64, "max_same_slot": pl.Int64}
-    if len(idx) < 2 or len(groups) < 2:
-        return pl.DataFrame([(name, float("nan"), 0, 0, 0, 0) for name in ("random_day_5fold", "loeo")], schema=schema, orient="row")
-    y = panel["Y"][idx].ravel()
-    row_day = np.repeat(idx, 96)
-    random = np.array_split(np.random.default_rng(0).permutation(idx), 5)
-    held = [np.array([d for d in idx if event[d] == group], dtype=np.int64) for group in groups if group in selected]
-    result: list[tuple[Cell, ...]] = []
-    for name, folds in (("random_day_5fold", random), ("loeo", held)):
-        absolute, n, n_splits, same_slot = 0.0, 0, 0, 0
-        evaluated: set[int] = set()
-        for holdout in folds:
-            validation = np.intersect1d(holdout, score_days)
-            train = idx[~np.isin(idx, holdout)]
-            tr = np.isin(row_day, train) & np.isfinite(y)
-            val = np.isin(row_day, validation) & np.isfinite(y)
-            if not tr.any() or not val.any():
-                continue
-            X = _diagnostic_features(panel, idx, holdout)
-            # ponytail: 누수 진단은 L2 모델만 사용, 분위수·위험 누수 격차가 필요하면 B1 전체를 비교 (FR-92)
-            booster = lgb.train({**LGB_PARAMS, "objective": "regression"}, lgb.Dataset(X[tr], label=y[tr]), num_boost_round=num_boost_round)
-            pred = np.asarray(booster.predict(X[val]), dtype=np.float64)
-            absolute += float(np.abs(y[val] - pred).sum())
-            n += int(val.sum())
-            n_splits += 1
-            evaluated.update(map(int, validation))
-            for d in validation:
-                matches = ((panel["Y"][train] == panel["Y"][d]) & (panel["Y"][d] > 40)).sum(axis=1)
-                same_slot = max(same_slot, int(matches.max(initial=0)))
-        result.append((name, absolute / n if n else float("nan"), n, len(evaluated), n_splits, same_slot))
-    return pl.DataFrame(result, schema=schema, orient="row")
-
-
-def transitions(state: "HMMState", panel: Panel) -> pl.DataFrame:
-    from gmst.hmm import transition_table
-
-    return transition_table(state["model"], panel, state["train_idx"], state["protocol"])

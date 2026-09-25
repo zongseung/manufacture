@@ -1,7 +1,6 @@
 from datetime import date
 from pathlib import Path
 
-import numpy as np
 import polars as pl
 import pytest
 
@@ -45,7 +44,6 @@ def test_fold_gap_and_event_purge() -> None:
     events = ["E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E1", "E9"]
     got = splits.fold_roles(dates, events, date(2021, 7, 8), date(2021, 7, 9), "val")
     assert got == ["train", "purged", "train", "train", "train", "train", "gap", "val", "val", ""]
-    assert splits.active_same(np.array([41., 40., np.nan]), np.array([41., 40., np.nan])) == 1
 
 
 def test_day_table_writer_uses_requested_csv_format(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

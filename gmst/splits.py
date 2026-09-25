@@ -6,7 +6,6 @@ import numpy as np
 import polars as pl
 
 from gmst import DATA
-from gmst.contracts import FloatArray
 from gmst.preprocess import build_15min
 
 # 한국천문연구원 특일정보
@@ -23,10 +22,6 @@ FOLDS: Final = {
 }
 COLUMNS: Final = ["date", "event_id", "dup_size", "is_copy", "copy_kind", "copy_of", "is_suspect", "is_operating", "is_holiday", "daytype", "n_missing", "anomaly", "f1", "f2", "f3", "f4", "test"]
 OUT: Final = DATA / "okm_cv_splits_2021.csv"
-
-
-def active_same(a: FloatArray, b: FloatArray) -> int:
-    return int(((a == b) & (a > 40)).sum())
 
 
 def fold_roles(dates: list[date], events: list[str], start: date, end: date, val_label: str) -> list[str]:
