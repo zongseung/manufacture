@@ -46,6 +46,7 @@ uv run python -m gmst.run_v3 --quick --folds f1 --out /tmp/v3q   # 빠른 확인
 uv run python -m gmst.run_v3 --final          # 9월 봉인 테스트를 열어 채점 → results_v3/final/
 uv run python -m gmst.report_v3               # 3장 산출물 → results_v3/ch3/
 uv run python -m gmst.report_v3 --no-peak-class   # 보조 지표(피크 이벤트 분류)를 뺄 때
+uv run python -m gmst.leakage_v3              # 1장 LOEO 누수 진단, 약 9분 → results_v3/ch1/
 uv run python -m gmst.realloc_v3              # 4장 생산 재배치 → results_v3/ch4/
 uv run python -m gmst.realloc_v3 --quick      # 빠른 확인 (Gibbs 400회, 60스텝, fold당 2일)
 uv run python -m gmst.realloc_v3 --shift      # 4장 분포 기반 시간대 이동 → results_v3/ch4/shift_*
@@ -60,6 +61,7 @@ uv run python -m gmst.realloc_v3 --shift      # 4장 분포 기반 시간대 이
 
 | 파일 | 장 / 용도 |
 |---|---|
+| `results_v3/ch1/leakage_gap.csv`, `loeo_days.csv`, `leakage_gap.png`, `summary.md` | 1 / 복사일 포함 자료에서 무작위 5-fold vs LOEO 누수 격차 |
 | `results_v3/oof_slots.csv`, `oof_days.csv`, `inner_days.csv` | 2 / fold별 슬롯·일 예측, Platt 보정용 내부일 |
 | `results_v3/metrics.csv`, `summary.csv`, `bootstrap.csv` | 2 / 지표, 날짜 짝짓기 부트스트랩 CI |
 | `results_v3/ch3/error_by_regime.csv` | 3 / 가동유형 × 생산 on/off, 요금 시간대, 시각별 오차 |
@@ -136,6 +138,18 @@ uv run python -m gmst.realloc_v3 --shift      # 4장 분포 기반 시간대 이
 | BAT-MLP | 7.79 | 6.91 | 14.43 | 약 3분 (GPU) |
 
 개선된 fold가 2개뿐이라 채택하지 않았습니다. 첫 실험에서는 f3·f4의 R-hat이 1.3–2.1로 수렴이 불충분했습니다. 비중심 재매개화로 수렴을 고친 뒤 다시 평가합니다.
+
+## 복사일 누수 진단 (1장, `gmst/leakage_v3.py`)
+
+복사일을 포함한 자료(9월 봉인 유지)에서 두 교차검증을 비교합니다. 날짜 단위 무작위 5-fold와 LOEO(복사 그룹 전체를 한 번에 제외, 126개 그룹)입니다. 격차는 같은 날끼리 짝지은 부트스트랩 95% CI로 냅니다.
+
+| 모델 | 무작위 5-fold | LOEO | 격차 (무작위 − LOEO) |
+|---|---|---|---|
+| BAT | 16.37 | 16.32 | +0.05 [−0.22, +0.42] |
+| M2 | 14.91 | 16.64 | **−1.73 [−3.63, −0.04]** |
+
+- 무작위로 나누면 시험일의 복사본이 학습에 섞여서 M2 성능이 약 10% 과대평가됩니다. BAT는 영향을 받지 않습니다.
+- BAT는 진단용으로 Gibbs 1,000회(버림 500회)만 돌립니다. 본 실험은 2,000/1,000회입니다.
 
 ## 데이터 규칙
 
