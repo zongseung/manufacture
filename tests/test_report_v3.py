@@ -42,3 +42,12 @@ def test_peak_events_f2_and_always_alarm_baseline() -> None:
     base = t.filter(pl.col("model") == "always_alarm").row(0, named=True)
     assert (base["tp"], base["fp"], base["fn"], base["precision"], base["recall"]) == (2, 2, 0, 0.5, 1.0)
     assert base["f1"] == pytest.approx(2 / 3) and base["f2"] == pytest.approx(5 / 6)  # b=.5: 2b/(1+b), 5b/(4b+1)
+
+
+def test_median_error_day_picks_closest_to_median() -> None:
+    from gmst.report_v3 import median_error_day
+
+    maes = {"2021.07.01": 1.0, "2021.07.02": 9.0, "2021.07.03": 4.0, "2021.07.04": 5.5, "2021.07.05": 20.0}  # median 5.5
+    slots = pl.DataFrame({"date": list(maes), "y_true": [0.0] * 5, "y_median": list(maes.values())})
+    assert median_error_day(slots) == "2021.07.04"
+    assert median_error_day(slots.filter(pl.col("date") != "2021.07.04")) == "2021.07.02"  # median 6.5: 9.0 (07.02) vs 4.0 (07.03) tie → earlier date

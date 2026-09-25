@@ -46,10 +46,14 @@ uv run python -m gmst.run_v3 --quick --folds f1 --out /tmp/v3q   # 빠른 확인
 uv run python -m gmst.run_v3 --final          # 9월 봉인 테스트를 열어 채점 → results_v3/final/
 uv run python -m gmst.report_v3               # 3장 산출물 → results_v3/ch3/
 uv run python -m gmst.report_v3 --no-peak-class   # 보조 지표(피크 이벤트 분류)를 뺄 때
+uv run python -m gmst.realloc_v3              # 4장 생산 재배치 → results_v3/ch4/
+uv run python -m gmst.realloc_v3 --quick      # 빠른 확인 (Gibbs 400회, 60스텝, fold당 2일)
+uv run python -m gmst.realloc_v3 --shift      # 4장 분포 기반 시간대 이동 → results_v3/ch4/shift_*
 ```
 
 - `run_v3`는 (fold, 모델) 조합마다 **스레드 1개짜리 프로세스**를 따로 띄워 병렬로 돌립니다. 작은 행렬(392×392)에서는 BLAS 다중 스레드가 오히려 느리기 때문입니다. 32코어 기준으로 개발 실행은 약 10–15분, `--final`은 약 1분 걸립니다.
 - 모든 모델의 예측은 as-of 래퍼를 거칩니다. d일 예측에서는 d일 이후의 전력값이 보이지 않습니다.
+- `realloc_v3`는 fold마다 BAT를 한 번 학습한 뒤(프로세스 4개), 검증기간 가동일 39일 × ρ 3개 × 인건비 가중 w 4개 = 468개 재배치를 풉니다. 약 40분 걸립니다.
 - `report_v3`는 fold별 BAT를 다시 학습하고, 그 사후 draw를 `results_v3/ch3/bat_draws_f*.npz`에 캐시합니다. `bat.py`를 바꿨다면 캐시를 지우고 다시 실행하십시오.
 
 ## 산출물과 보고서 장
@@ -61,8 +65,13 @@ uv run python -m gmst.report_v3 --no-peak-class   # 보조 지표(피크 이벤�
 | `results_v3/ch3/error_by_regime.csv` | 3 / 가동유형 × 생산 on/off, 요금 시간대, 시각별 오차 |
 | `results_v3/ch3/peak_events.csv`, `fn_fp_conditions.csv` | 3 / [보조 지표] 피크 초과 분류 F1과 "매일 경보" 기준선, 미탐지·오경보 조건 |
 | `results_v3/ch3/attention_k*.csv/png`, `transfer_gain.csv`, `attention_shape.csv` | 3·5 / 어텐션 지도와 생산 이득의 사후분포 |
+| `results_v3/ch3/forecast_val.png`, `forecast_test.png`, `pred_vs_actual.png` | 2 / 검증 fold 대표일 예측, 봉인 테스트 14일 예측, 예측값–실측 산점도 |
 | `results_v3/ch3/summary.md` | 3 / 핵심 수치 요약 |
 | `results_v3/final/test_predictions.csv`, `test_metrics.csv`, `eval_mask.csv` | 2·6 / 9월 봉인 테스트 예측과 채점 |
+| `results_v3/ch4/realloc_days.csv` | 4 / 날짜 × ρ × w별 재배치 전후 피크, 사후확률 P(피크 감소), 권고 여부, 요금 변화 |
+| `results_v3/ch4/pareto.csv`, `realloc_example_pareto.png` | 4 / 인건비–전력요금 절충 곡선, 재배치 예시 |
+| `results_v3/ch4/summary.md` | 4 / 핵심 수치 요약 |
+| `results_v3/ch4/shift_days.csv`, `shift_summary.md` | 4 / 날짜 × σ × 후보 계획별 사후 판정, 선택된 시간대 이동 계획 |
 
 `test_predictions.csv`는 UTF-8, 1,344행(14일 × 96슬롯)입니다. 열: `datetime`(YYYY.MM.DD HH:MM:SS), `model`, `y_mean`, `y_median`, `q05`…`q95`, `M_hat_median`, `M_hat_mean`, `peak_time_mode`(HH:MM), `risk_C50/C75/C90`(Platt 보정), `C50/C75/C90`. `eval_mask.csv`는 결측 슬롯 표시입니다.
 
@@ -80,6 +89,53 @@ uv run python -m gmst.report_v3 --no-peak-class   # 보조 지표(피크 이벤�
 - 모델 선택은 검증 fold로만 했습니다. 봉인 테스트는 사후 확인입니다. 9월 구간은 v2 때 한 번 열린 적이 있습니다.
 - 복사일을 포함해 학습해도 BAT는 MAE 7.59로 거의 같습니다. M2는 13.76으로 나빠집니다.
 - 절제 실험: 잠재 날짜효과를 평균식에 넣으면 MAE 19.0(f1), 3차 잔차 보정(M4)을 더하면 10.2, 어텐션을 빼면 MAE 차이는 +0.7%입니다. 다만 어텐션이 없으면 전달행렬과 재배치 계산이 불가능합니다.
+
+## 생산 재배치 (4장)
+
+재배치 전략은 두 가지이며, 둘 다 BAT 사후분포로 권고 여부를 판정합니다(P(피크 감소) ≥ 0.95일 때만 권고).
+
+### 1) 생산량 재배치 (`gmst/reallocate.py`, `python -m gmst.realloc_v3`)
+가동 시각은 그대로 두고 생산량만 옮깁니다.
+- **목적함수:** 최대수요 항(중간·최대부하 시간대의 smooth-max × 기본요금/30) + 시간대별 전력량요금 + w × 인건비 할증 배수 × 생산량
+- **규칙:** R1 일 총생산 보존, R2 기존 가동 구간 안에서만 이동, R3 시간당 상한(학습기간 시간대별 95분위), R4 이동량 ≤ ρ × 일 총생산, R6 날짜 간 이동 없음
+- **풀이:** Adam 경사 단계 뒤마다 Dykstra 교대 투영(박스·초평면 ∩ L1 공). 새 계획이 원래 계획보다 비싸면 원래 계획을 돌려줍니다.
+
+### 2) 분포 기반 시간대 이동 (`python -m gmst.realloc_v3 --shift`)
+가동 시각 자체를 옮깁니다. 용어는 `CONTEXT.md`를 따릅니다.
+- **계획 분포(학습 fold별 추정):**
+  - 블록 시작 시각 | 가동유형 ~ 범주형 + Dirichlet(0.5) 사전
+  - 가동 시각의 시간당 생산량 | 주간(07–20시)·야간 ~ Gamma(적률 적합). KS 통계량은 Gamma 0.043, 로그정규 0.095, 지수 0.133
+- **후보 계획:**
+  - 블록 전체를 ±1–2시간 이동. 새 시작 시각의 사후예측확률이 5% 이상이어야 함
+  - 단가가 높은 시각의 생산을 더 싼 인접 가동 시각으로 이동. 이동 후 생산량이 해당 시간대 Gamma 95분위 이하여야 함
+- **실행 오차:** 실제 생산 = 계획 × LogNormal(0, σ), σ ∈ {0.05, 0.1, 0.2} 민감도
+- **선택:** 기준을 통과한 후보 중 기대 요금이 가장 낮은 계획
+
+### 결과 (검증기간 가동일, 모델 기반 반사실 추정)
+
+| 항목 | 생산량 재배치 (ρ=0.2, w=0) | 시간대 이동 (σ=0.1) |
+|---|---|---|
+| 대상 가동일 | 39 | 38 |
+| 권고일 | 10 | **20** |
+| 피크 감소 중앙값 / 최댓값 | 0.1 / 1.0 kW | **3.4 / 9.8 kW** |
+| 요금 변화 중앙값 | −1,194원/일 | **−5,235원/일** (월 22일 가동 기준 약 −11.5만 원) |
+| 인건비 지수 | 1.000 | 1.000 |
+
+- 시간대 이동의 권고일은 σ = 0.05 / 0.1 / 0.2에서 20 / 20 / 19일로, 실행 오차에 거의 영향받지 않습니다.
+- 권고 20건 중 19건은 **11시 생산을 12시로 이동**하는 계획입니다. 여름철 11시는 최대부하(191.1원/kWh), 12시는 중간부하(109.0원/kWh)이고, 두 시각 모두 인건비 1.0배 구간입니다. 12시가 휴게 시간이라면 교대 운영을 바꿔야 적용할 수 있습니다.
+- 생산량 재배치의 효과가 작은 이유: 전력은 생산량보다 가동 여부(on/off)에 주로 반응하는데(가동 이득 13–16 kW), 이 전략은 가동 시각을 고정합니다.
+- 7–8월 래칫 바닥은 222 kW이고 검증기간 피크는 187–201 kW라서, 이 기간의 절감은 대부분 전력량요금입니다.
+
+## 비선형 확장 실험 (BAT-MLP)
+
+`gmst/bat_hmc.py`는 BAT의 생산 응답에 단조 MLP 잔차를 더하고 GPU 배치 HMC(32체인, 이중 평균 보폭 적응)로 사후분포를 추정합니다. 채택 기준은 "전체 MAE 개선 + 4개 fold 중 3개 이상 개선"입니다.
+
+| 모델 | MAE | CRPS | 일 피크 MAE | 학습 시간 |
+|---|---|---|---|---|
+| BAT | 7.82 | 6.99 | 14.50 | 약 20초 (CPU) |
+| BAT-MLP | 7.79 | 6.91 | 14.43 | 약 3분 (GPU) |
+
+개선된 fold가 2개뿐이라 채택하지 않았습니다. 첫 실험에서는 f3·f4의 R-hat이 1.3–2.1로 수렴이 불충분했습니다. 비중심 재매개화로 수렴을 고친 뒤 다시 평가합니다.
 
 ## 데이터 규칙
 
@@ -111,10 +167,19 @@ uv run python -m gmst.report_v3 --no-peak-class   # 보조 지표(피크 이벤�
 
 ## 재현성·검사
 
-seed를 고정하고 날짜별 난수를 씁니다. 같은 장치에서 같은 입력이면 같은 결과가 나옵니다.
+seed를 고정하고 날짜별 난수를 씁니다. 같은 장치에서 같은 입력이면 같은 결과가 나옵니다. BAT-MLP의 GPU 연산은 장치에 따라 소수점 아래 값이 달라질 수 있습니다.
+
+전체 재현 순서(32코어 기준 약 1시간):
 
 ```bash
-uv run pytest -q
+uv sync                                   # 1. 환경
+uv run pytest -q                          # 2. 검사
+uv run python -m gmst.run_v3              # 3. 검증 f1–f4, 약 10–15분 → results_v3/
+uv run python -m gmst.run_v3 --final      # 4. 9월 봉인 테스트, 약 1분 → results_v3/final/
+uv run python -m gmst.report_v3           # 5. 3장 산출물 → results_v3/ch3/
+uv run python -m gmst.realloc_v3          # 6. 4장 재배치, 약 40분 → results_v3/ch4/
+uv run python -m gmst.realloc_v3 --shift  # 7. 4장 시간대 이동, 약 3분 → results_v3/ch4/shift_*
+cd paper && tectonic -X compile main.tex  # 8. 보고서 PDF (XeLaTeX, Noto CJK KR 폰트)
 ```
 
 ## 폴더 구조
@@ -124,8 +189,11 @@ uv run pytest -q
   - 기준선: `baselines`(B0, M2), `backbone`(M2의 τ·반감기 선택)
   - 제안 모델: `bat`
   - 평가: `evaluate`, `analysis`
-  - 요금·재배치: `scenario`(요금), `reallocate`(재배치)
+  - 요금·재배치: `scenario`(요금), `reallocate`(재배치 풀이), `realloc_v3`(4장 실행)
+  - 비선형 확장: `bat_hmc`(BAT-MLP, GPU HMC)
   - 러너·리포트: `run_v3`, `report_v3`
 - `tests/`: 모듈 검사
 - `results_v3/`: 실행 산출물
 - `5. 자원 최적화 AI 데이터셋/`: 원본 데이터와 생성된 CSV
+- `paper/`: 보고서 원고(한국어, AAAI 2026 2단 양식, XeLaTeX)
+- `CONTEXT.md`: 도메인 용어집
