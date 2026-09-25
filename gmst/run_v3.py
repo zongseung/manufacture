@@ -85,6 +85,7 @@ def run(out: Path, folds: tuple[str, ...], n_iter: int, rounds: int, final: bool
                .pivot(on="metric", index=["model", "fold"], values="value").sort("fold", "model"))
     if final:
         _final_outputs(out, slots, days)
+        slots.write_csv(out / "slots.csv")  # 전 모델 슬롯(oof_slots.csv 스키마): 보고서 그림용
         summary.write_csv(out / "test_metrics.csv")
         metrics.write_csv(out / "test_metrics_long.csv")
         return summary

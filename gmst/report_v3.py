@@ -175,6 +175,83 @@ def _set_font() -> None:
     matplotlib.rcParams["axes.unicode_minus"] = False
 
 
+def median_error_day(slots: pl.DataFrame) -> str:
+    """Date whose daily MAE of y_median is closest to the median daily MAE (ties → earliest date)."""
+    d = (slots.filter(pl.col("y_true").is_finite() & pl.col("y_median").is_finite())
+         .group_by("date").agg((pl.col("y_median") - pl.col("y_true")).abs().mean().alias("mae")))
+    return d.sort((pl.col("mae") - d["mae"].median()).abs(), "date").row(0, named=True)["date"]
+
+
+def _mae(part: pl.DataFrame) -> float:
+    ok = part.filter(pl.col("y_true").is_finite() & pl.col("y_median").is_finite())
+    return float((ok["y_median"] - ok["y_true"]).abs().mean())  # type: ignore[arg-type]
+
+
+def _forecast_ax(ax, bat: pl.DataFrame, m2: pl.DataFrame, bands: tuple[tuple[str, str], ...], labels: bool = False) -> None:  # type: ignore[no-untyped-def]
+    """Actual (black), BAT median (blue) with quantile bands, M2 median (orange dashed) on one axis."""
+    x = bat["datetime"].str.strptime(pl.Datetime, "%Y.%m.%d %H:%M:%S").to_numpy()
+    for (lo, hi), alpha in zip(bands, (0.15, 0.3), strict=False):
+        ax.fill_between(x, bat[lo].to_numpy(), bat[hi].to_numpy(), color="tab:blue", alpha=alpha, lw=0,
+                        label=f"BAT {int(hi[1:]) - int(lo[1:])}% 구간")
+    mae = {m: f" (MAE {_mae(f):.1f})" if labels else "" for m, f in (("BAT", bat), ("M2", m2))}
+    ax.plot(x, bat["y_true"].to_numpy(), color="black", lw=1, label="실측")
+    ax.plot(x, bat["y_median"].to_numpy(), color="tab:blue", lw=1.2, label="BAT 중앙값" + mae["BAT"])
+    ax.plot(x, m2["y_median"].to_numpy(), color="tab:orange", lw=1.2, ls="--", label="M2 중앙값" + mae["M2"])
+    ax.set_ylabel("kW")
+
+
+def forecast_figures(val: pl.DataFrame, test: pl.DataFrame | None, ctx: pl.DataFrame, out: Path) -> dict[str, str]:
+    """forecast_val.png (median-error operating day per fold), forecast_test.png, pred_vs_actual.png; returns picked days."""
+    import matplotlib.dates as mdates
+    import matplotlib.pyplot as plt
+
+    optype = dict(ctx.filter(pl.col("q") == 0).select("date", "optype").iter_rows())
+    pick = lambda f, m: f.filter(pl.col("model") == m).sort("datetime")  # noqa: E731
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8), sharey=True)
+    picked = {}
+    for ax, (fold, part) in zip(axes.ravel(), sorted(val.partition_by("fold", as_dict=True).items()), strict=False):
+        bat = pick(part, "BAT")
+        day = picked[fold[0]] = median_error_day(bat.filter(pl.col("date").replace_strict(optype, default="k0") != "k0"))
+        _forecast_ax(ax, bat.filter(pl.col("date") == day), pick(part, "M2").filter(pl.col("date") == day),
+                     (("q05", "q95"), ("q25", "q75")), labels=True)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+        ax.set_title(f"{fold[0]} {day.replace('.', '-')} (가동유형 {KIND_NAMES[int(optype[day][1])]})")
+        ax.legend(fontsize=7, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out / "forecast_val.png", dpi=120)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 5), sharex=True, sharey=True)
+    for ax, m in zip(axes, ("BAT", "M2"), strict=True):
+        ok = val.filter((pl.col("model") == m) & pl.col("y_true").is_finite() & pl.col("y_median").is_finite())
+        ax.scatter(ok["y_true"], ok["y_median"], s=3, alpha=0.3, color="tab:blue" if m == "BAT" else "tab:orange")
+        lim = [0, float(max(ok["y_true"].max(), ok["y_median"].max()))]  # type: ignore[arg-type]
+        ax.plot(lim, lim, color="black", lw=0.8)
+        ax.set(xlabel="실측 (kW)", ylabel="예측 중앙값 (kW)", title=f"{m} — 검증 f1–f4, MAE {_mae(ok):.2f} kW", aspect="equal")
+    fig.tight_layout()
+    fig.savefig(out / "pred_vs_actual.png", dpi=120)
+    plt.close(fig)
+
+    if test is not None:
+        holidays = scenario.tariff_holidays()
+        fig, ax = plt.subplots(figsize=(16, 5))
+        bat = pick(test, "BAT")
+        _forecast_ax(ax, bat, pick(test, "M2"), (("q05", "q95"),), labels=True)
+        for d in sorted(set(bat["date"])):
+            day = datetime.strptime(d, "%Y.%m.%d")
+            if day.weekday() == 6 or day.date() in holidays:
+                ax.axvspan(day, day.replace(hour=23, minute=59), color="grey", alpha=0.12, lw=0)
+        ax.xaxis.set_major_locator(mdates.DayLocator())
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+        ax.set(title="봉인 시험 구간 2021-09-01..14 (회색: 일요일·공휴일)")
+        ax.margins(x=0)
+        ax.legend(fontsize=8, loc="upper left", ncol=4)
+        fig.tight_layout()
+        fig.savefig(out / "forecast_test.png", dpi=120)
+        plt.close(fig)
+    return picked
+
+
 def summary_md(err: pl.DataFrame, peaks: pl.DataFrame | None, fnfp: pl.DataFrame | None, shape: pl.DataFrame, gain: pl.DataFrame,
                slots: pl.DataFrame) -> str:
     ok = slots.filter(pl.col("model").is_in(["BAT", "M2"]) & pl.col("y_true").is_finite() & pl.col("y_median").is_finite())
@@ -242,7 +319,8 @@ def main() -> None:
         days, inner = ev.calibrate_oof(days, "platt", inner)
     pstar = ev.p_star_table(inner, days.select(ev.KEYS).unique().iter_rows())
 
-    err = error_by_regime(slots, slot_context(panel))
+    ctx = slot_context(panel)
+    err = error_by_regime(slots, ctx)
     err = pl.concat([err, analysis.error_by_condition(slots.filter(pl.col("model").is_in(MODELS)), panel, MODELS)
                      .filter(pl.col("condition").is_in(["production", "temperature", "daytype"]))], how="diagonal_relaxed")
     err.write_csv(out / "error_by_regime.csv")
@@ -260,6 +338,9 @@ def main() -> None:
         heatmap(table, k, out / f"attention_k{k}.png")
     gain.write_csv(out / "transfer_gain.csv")
     shape.write_csv(out / "attention_shape.csv")
+    final = a.results / "final" / "slots.csv"
+    picked = forecast_figures(slots, pl.read_csv(final) if final.exists() else None, ctx, out)
+    print("[report_v3] forecast_val days:", picked)
     (out / "summary.md").write_text(summary_md(err, peaks, fnfp, shape, gain, slots))
     print((out / "summary.md").read_text())
 

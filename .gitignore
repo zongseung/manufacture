@@ -16,3 +16,8 @@ results_smoke/
 /tasks/
 /.omo/
 /results_flow_smoke*/
+
+# v3 산출물 중 재생성 가능한 캐시·작업물
+results_v3/ch3/*.npz
+paper/_workspace/
+paper/pg-*.png
