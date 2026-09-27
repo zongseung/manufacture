@@ -1,0 +1,38 @@
+\section{모형 세부 사항}
+\label{app:model}
+
+C-BAT의 모수는 표준화 단위에서 추정한다. 전력은 학습 구간 표준편차로 나누고, 생산량은 학습 구간 최댓값 $q_{\max}$로 정규화한다(식~\ref{eq:ch2-channels}). 표~\ref{tab:chB-prior}의 사전분포 값은 모두 이 단위 기준이다.
+
+\begin{table}[htbp]
+\centering
+\caption{C-BAT의 사전분포(표준화 단위). IG는 역감마(모양, 척도)다.}
+\label{tab:chB-prior}
+\small
+\begin{tabular}{ll}
+\toprule
+모수 & 사전분포 \\
+\midrule
+기본곡선 $\mu_{k,\cdot}$ & $\mathcal N\big(0,\ \tau_k(\mathbf R+10^{-4}\mathbf I)^{-1}\big)$, $\mathbf R$은 순환 RW2 정밀도 행렬 \\
+평활 분산 $\tau_k$ & $\mathrm{IG}(1,\ 0.01)$ \\
+기준일 계수 $\gamma_k$ & $\mathcal N(0,\ 5^2)$ \\
+로그 생산 이득 $\omega_{c,k}=\log w_{c,k}$, $k=1,2,3$ & $\mathcal N(\log 0.3,\ 1.5^2)$; 비가동일은 $w_{c,0}=0$ \\
+커널 형상 $(\log\sigma,\ \log\beta,\ c)$ & $(\log 1.5,\ \log 2,\ 0)$에 고정 \\
+날짜 효과 분산 $\sigma^2_{u,g}$ & $\mathrm{IG}(2,\ 0.01)$ \\
+혁신 분산 $\sigma^2_{\eta,g}$ & $\mathrm{IG}(2,\ 0.01)$ \\
+자기상관 $\rho_g$ & $\mathrm U[0,\ 0.98)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+커널 형상을 가동유형별로 학습하는 변형에서는 $(\log\sigma,\log\beta,c)$에 중심 $(\log1.5,\log2,0)$, 표준편차 $(0.5,\ 0.5,\ 1.0)$의 정규 사전분포를 둔다. 시간 가중치 $\omega_d$(식~\ref{eq:ch2-weight})는 우도의 정밀도에만 곱하고 날짜 효과의 사전분포에는 곱하지 않는다. 혁신 분산의 조건부분포에서는 모양 모수에 관측 수 대신 가중치 합의 절반을 더한다.
+
+한 번의 반복은 다음 순서로 진행한다.
+\begin{enumerate}
+\item 현재 $\rho_g$로 결측 간격을 반영한 AR(1) 백색화 계수(식~\ref{eq:ch2-gap})를 계산한다.
+\item 가동유형 $k=1,2,3$마다 두 로그 이득 $\omega_{\cdot,k}$에 보폭 0.5의 정규 랜덤워크를 제안하고, $(\mu_{k,\cdot},\gamma_k)$를 적분한 주변우도와 사전분포로 채택 여부를 정한다. 학습 자료에 그 유형이 없으면 사전분포에서 뽑는다.
+\item 가동유형마다 $(\mu_{k,\cdot},\gamma_k)$를 결합 정규 조건부분포에서 Cholesky 분해로 한꺼번에 뽑는다.
+\item 평활 분산 $\tau_k$를 역감마 조건부분포에서 뽑는다.
+\item 날짜 효과 $u_d$를 켤레 정규 조건부분포에서 뽑는다.
+\item 잡음 상태 $g$마다 $\rho_g$를 보폭 0.04의 랜덤워크 Metropolis로 갱신하고, $\sigma^2_{\eta,g}$와 $\sigma^2_{u,g}$를 역감마 조건부분포에서 뽑는다.
+\end{enumerate}
+6,000회를 반복해 앞 3,000회를 버리고, 남은 3,000개를 사후표본으로 저장한다. 초기값은 $\omega_{c,k}=\log0.3$, $\mu_{k,\cdot}$는 가동유형별 학습 평균 곡선, $\gamma_k=0$, $\rho_g=0.5$이다.

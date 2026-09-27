@@ -1,0 +1,109 @@
+\section{코드 구성 및 재현성}
+\label{app:repro}
+
+제출 예측은 저장소 루트에서 명령 두 줄로 원자료 전처리부터 학습, 추론, 결과 파일 생성까지 자동으로 재현된다. 보고서의 모든 표와 그림도 모듈 하나당 명령 하나로 다시 만들 수 있다. 이 부록은 실행 환경, 코드 구성, 결과와 명령의 대응, 자료 분할과 누수 점검, 반복 설정과 사전 등록 기록을 차례로 적는다.
+
+\subsection{한 명령 실행과 환경 고정}
+
+제출 파일은 다음 두 명령으로 만든다.
+
+\begin{flushleft}\ttfamily\small
+uv sync\\
+uv run python main.py
+\end{flushleft}
+
+\texttt{main.py}는 2021년 9월 1일 이전 자료로 최종 C-BAT를 적합하고(6,000회 반복, 앞 3,000회 버림, 시드 0) 9월 1--14일을 예측해 \path{results_v3/submission/test_predictions.csv}에 쓴다. 14일 $\times$ 96슬롯의 1,344행이며 평균·중앙값, 5--95\% 분위수, 일 피크 분포의 중앙값과 평균, 최빈 피크 시각, 보정 전 경로 초과확률을 담는다. CPU에서 약 1분 걸리고 GPU, 외부 자료, 네트워크 접속은 필요 없다.
+
+환경은 Python 3.13 이상과 \texttt{uv}를 쓴다. 직접 의존성은 numpy, polars, lightgbm, matplotlib 네 개다. 모든 패키지 버전은 \texttt{uv.lock}에 고정되어 있고, \texttt{uv}를 쓰지 않는 환경을 위해 같은 버전을 \texttt{requirements.txt}로 내보냈다. 작은 행렬 연산에서는 다중 스레드 BLAS가 오히려 느려서 \texttt{main.py}와 실험 러너는 \texttt{OMP\_NUM\_THREADS} 등 스레드 수를 1로 고정하고 작업 단위로 병렬 실행한다.
+
+\subsection{코드 구성}
+
+코드는 \texttt{gmst/} 패키지 하나에 모여 있고 모듈은 역할별로 나뉜다(표~\ref{tab:A-modules}).
+
+\begin{table}[h]
+\centering
+\caption{\texttt{gmst/} 모듈 구성.}
+\label{tab:A-modules}
+\small
+\begin{tabular}{p{0.16\linewidth}p{0.4\linewidth}p{0.36\linewidth}}
+\toprule
+구분 & 모듈 & 역할 \\
+\midrule
+자료 & \texttt{contracts}, \texttt{preprocess}, \texttt{splits}, \texttt{features}, \texttt{lgbm\_features} & 측정값 정리, 복사일·결측·봉인 규칙, 시간순 fold, 특징 \\
+기준 모델 & \texttt{baselines}, \texttt{backbone}, \texttt{benchmark\_models} & B0, B0\_kind, LightGBM(기본·튜닝), RW2 기본곡선 \\
+모델 & \texttt{conditional\_bat}, \texttt{conditional\_ar}, \texttt{bat} & C-BAT, 결측 간격 AR(1) 우도, 기존 BAT·고정 커널 \\
+평가 & \texttt{evaluate}, \texttt{analysis}, \texttt{conditional\_diagnostics}, \texttt{rescore}, \texttt{robustness}, \texttt{leakage\_v3} & 지표, 부트스트랩, 수렴 진단, 기준 모델 예측, 누수 진단 \\
+피크·요금 & \texttt{peak\_conditions}, \texttt{plan\_sensitivity}, \texttt{analog\_days}, \texttt{billing\_alarm}, \texttt{scenario} & 피크 조건, 계획 민감도, 유사일 비교, 경보 백테스트, 2021 요금표 \\
+러너 & \texttt{run\_conditional}, \texttt{run\_v3} & C-BAT 실험·비교·9월 예측, 기존 BAT 파이프라인 \\
+보고 & \texttt{report\_tables}, \texttt{report\_figures}, \texttt{report\_v3}, \texttt{paper\_figures} & 저장된 예측으로 표·그림 생성(재적합 없음) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{결과와 명령의 대응}
+
+보고서의 표와 그림은 표~\ref{tab:A-commands}의 명령으로 재현한다. 모든 명령은 \texttt{uv run python -m}으로 실행하며 스레드 수 1을 권장한다. C-BAT를 적합하는 명령에는 \texttt{-{}-n-iter 6000 -{}-burn 3000}을 붙이고, 비교 실험은 \texttt{-{}-source results\_v3/robustness}로 기준 모델 예측을 읽는다. 앞 단계의 출력을 뒤 단계가 읽으므로 표의 순서대로 실행한다.
+
+\begin{table}[h]
+\centering
+\caption{보고서 결과와 재현 명령. 모듈 이름 앞의 \texttt{gmst.}는 생략했다.}
+\label{tab:A-commands}
+\small
+\begin{tabular}{p{0.3\linewidth}p{0.36\linewidth}p{0.26\linewidth}}
+\toprule
+보고서 결과 & 명령 & 출력 폴더 \\
+\midrule
+복사일 누수 진단 & \texttt{leakage\_v3} & \path{results_v3/ch1} \\
+기준 모델 개발 구간 예측 & \texttt{robustness -{}-out results\_v3/robustness} & \path{results_v3/robustness} \\
+C-BAT와 학습형 커널 비교, 주 성능표 & \texttt{run\_conditional -{}-attention-ablation} & \path{results_v3/attention_ablation} \\
+기준일 규칙 비교 & \texttt{run\_conditional -{}-ref-comparison} & \path{results_v3/ref_ablation} \\
+잡음 변형 비교 & \texttt{run\_conditional -{}-noise-comparison} & \path{results_v3/noise_ablation} \\
+피크 발생·오차 조건 & \texttt{peak\_conditions}(인자는 표 아래) & \path{results_v3/peak_conditions_v2} \\
+유사일 비교 & \texttt{analog\_days} & \path{results_v3/analog_days} \\
+월 최대 갱신 경보 백테스트 & \texttt{billing\_alarm} & \path{results_v3/billing_alarm} \\
+보고서 표(주 성능, 피크 층별, 절제, 경보, 구간, 수렴) & \texttt{report\_tables} & \path{results_v3/report_tables} \\
+보고서 그림 & \texttt{report\_figures} & \path{report/figs} \\
+9월 제출 예측 & \texttt{main.py} & \path{results_v3/submission} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+피크 조건 분석은 C-BAT의 개발 구간 예측을 읽도록 다음 인자를 준다.
+
+\begin{flushleft}\ttfamily\small
+uv run python -m gmst.peak\_conditions -{}-source results\_v3/attention\_ablation\\
+\quad -{}-model BAT\_conditional\_gaussian\_fixed\_attention -{}-out results\_v3/peak\_conditions\_v2
+\end{flushleft}
+
+각 실행은 설정, 입력 자료와 코드의 해시, 9월 구간 개봉 여부를 \texttt{run\_status.json}에 남긴다. 따라서 어떤 코드와 자료로 어떤 결과가 나왔는지 사후에 확인할 수 있다.
+
+\subsection{자료 분할과 9월 봉인}
+
+자료는 날 단위로 나누고 시간 순서를 지킨다. 개발 구간은 2021년 7월 7일--8월 31일을 14일씩 네 fold(f1--f4)로 나눈 rolling origin 검증이다. 각 fold는 그 이전 날로만 학습한다. 시험 구간인 9월 1--14일의 전력값은 기본 로더에서 결측으로 봉인되어 있고 \texttt{main.py}와 \texttt{run\_conditional -{}-final}에서만 열린다.
+
+9월 구간은 두 번 열렸다. 첫 번째는 이전 버전(v2) 개발 중이었고 두 번째는 C-BAT를 동결한 뒤 한 번 연 것이다. C-BAT로 연 뒤에는 모델을 조정하거나 다시 돌리지 않았다. 그 뒤의 잡음 변형, 어텐션 기준일, 2계층 피크 모형, 앙상블 실험은 f1--f4에서만 사전 등록한 채택 규칙으로 평가했고 어느 것도 채택되지 않았다. 9월이 이미 한 번 열린 적이 있으므로 모델 선택의 근거는 f1--f4 결과로 둔다.
+
+\subsection{누수 점검}
+
+누수는 자료 수준과 코드 수준에서 따로 점검했다 \citep{kapoor2023leakage}. 자료 수준에서는 전력 곡선이 다른 날과 똑같은 복사일 122일을 찾아 목표와 기준일에서 가리고, 무작위 5-fold와 사건 단위 보류(LOEO)를 비교해 누수 규모를 쟀다(\texttt{leakage\_v3}). 무작위 교차검증은 LightGBM 기본 모형의 오차를 약 10\% 낮게 추정했다.
+
+코드 수준에서는 모든 모델의 예측이 as-of 래퍼를 거친다. 래퍼는 $d$일을 예측할 때 $d$일 이후의 전력값을 모델에 넘기지 않는다. 회귀 검사는 이를 교란 실험으로 확인한다. 전력 행렬에서 $Y[d{:}]$를 $10^9$으로 바꿔도 C-BAT의 예측 경로가 한 값도 바뀌지 않아야 통과한다(\path{tests/test_conditional_bat.py}). 같은 방식의 검사가 기본곡선(\path{tests/test_backbone.py})과 LightGBM 기준 모델(\path{tests/test_benchmark_models.py})에도 있다.
+
+\subsection{반복 설정과 검사}
+
+확률 모델은 시드 0·1·2로 세 번 적합하고 지표는 세 시드의 평균을 보고한다. 각 적합은 6,000회 반복하고 앞 3,000회를 버린다. 수렴은 기록한 모수 22개의 기본 split-$\widehat R$ \citep{gelman1992rhat,vehtari2021rhat}로 확인했고 모든 fold의 내부·외부 적합에서 최댓값이 1.03 이하였다. 9월 제출 예측은 시드 0 한 번의 적합이다.
+
+회귀 검사는 \texttt{uv run pytest -q}로 실행하며 133개가 모두 통과한다. 검사는 과거 기준일만 쓰는지, 튜닝·보정 구간이 분리되는지, 봉인된 날이 분석에서 빠지는지, 고정 커널과 상태별 잡음이 의도대로 동작하는지, 요금시간대 마스크가 요금표와 맞는지를 확인한다.
+
+\subsection{사전 등록 기록}
+
+결과를 보기 전에 판정 규칙을 적어 둔 실험은 \path{document/}에 기록되어 있다.
+\begin{itemize}
+\item \path{BILLING_alarm_preregistration.md}: 월 최대 갱신 경보 규칙과 백테스트.
+\item \path{CBAT_counterfactual_validation.md}: 모형 반사실 절감액의 유사일 검증과 요금 규칙 적용.
+\item \path{CBAT_ref_decision.md}: 기준일 규칙 결정.
+\item \path{CBAT_attnref_preregistration.md}, \path{CBAT_planref_preregistration.md}: 기준일 규칙의 변형.
+\item \path{CBAT_noise_variants.md}: 잡음 변형 비교.
+\item \path{CBAT_peak_layer_plan.md}: 2계층 피크 모형.
+\item \path{ENSEMBLE_preregistration.md}, \path{RISK_issuance_preregistration.md}: LightGBM 앙상블과 위험확률 발행 방식.
+\end{itemize}
