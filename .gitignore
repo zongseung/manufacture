@@ -4,15 +4,19 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .sdd/
-.claude/worktrees/
+.claude/
 dist/
 *.log
 results_repro/
 results_smoke/
 /claudedocs/
-/docs/superpowers/plans/
-/docs/superpowers/specs/
-/document/*proposal*.md
+/docs/superpowers/
+/docs/*.hwp
+/document/*.md
+!/document/RISK_issuance_preregistration.md
+!/document/BILLING_alarm_preregistration.md
+!/document/CBAT_september_test.md
+!/document/CBAT_counterfactual_validation.md
 /tasks/
 /.omo/
 /results_flow_smoke*/
@@ -21,3 +25,32 @@ results_smoke/
 results_v3/ch3/*.npz
 paper/_workspace/
 paper/pg-*.png
+
+# 로컬 에이전트 설정·작업 기록
+/CLAUDE.md
+/PONYTAIL-DEBT.md
+/.superpowers/
+/.codegraph/
+/exa-results/
+/notebooks/
+.pytest_cache/
+.ruff_cache/
+
+# 재생성 가능한 실험 결과 (제출 산출물은 보관)
+/results/
+/results_ar/
+/results_flow/
+/results_v3/*
+!/results_v3/submission/
+
+# LaTeX 빌드 중간 파일·임시 미리보기
+*.aux
+*.bbl
+*.blg
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+/paper/eq-*.png
+/report/results_chapter.pdf
