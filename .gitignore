@@ -12,11 +12,10 @@ results_smoke/
 /claudedocs/
 /docs/superpowers/
 /docs/*.hwp
-/document/*.md
-!/document/RISK_issuance_preregistration.md
-!/document/BILLING_alarm_preregistration.md
-!/document/CBAT_september_test.md
-!/document/CBAT_counterfactual_validation.md
+/document/
+/report/
+/report_hwp/
+/CONTEXT.md
 /tasks/
 /.omo/
 /results_flow_smoke*/
@@ -53,4 +52,3 @@ paper/pg-*.png
 *.fdb_latexmk
 *.synctex.gz
 /paper/eq-*.png
-/report/results_chapter.pdf
