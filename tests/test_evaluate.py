@@ -55,6 +55,25 @@ def test_auc_ties_and_missing_event_class_are_explicit() -> None:
     assert np.isnan(ev.prf(np.array([True, False]), np.zeros(2, dtype=bool))["f1"])
 
 
+@pytest.mark.parametrize("y, predicted, expected", [
+    ([1., 3., np.nan, 9.], [2., 1., 100., np.inf], (-1.5, -.5, 75., 2)),
+    ([1., 3.], [1., 3.], (1., 0., 0., 2)),
+    ([1., 1.], [1., 1.], (np.nan, 0., 0., 2)),
+    ([0.], [2.], (np.nan, 2., np.nan, 1)),
+    ([], [], (np.nan, np.nan, np.nan, 0)),
+])
+def test_extra_metrics_keep_undefined_cases_and_finite_pairs(
+    y: list[float], predicted: list[float], expected: tuple[float, float, float, int],
+) -> None:
+    # Given finite, missing, constant and empty targets.
+    truth, forecast = np.array(y), np.array(predicted)
+    # When scoring all added point metrics.
+    measured = [metric(truth, forecast) for metric in (ev.r2, ev.bias, ev.wape)]
+    # Then negative R² is retained and undefined scores stay NaN.
+    np.testing.assert_allclose([value for value, _ in measured], expected[:3], equal_nan=True)
+    assert all(n == expected[3] for _, n in measured)
+
+
 def test_observed_peak_excludes_hidden_high_slot() -> None:
     # Given a large forecast in an unobserved slot.
     paths = np.ones((3, 96))
@@ -332,12 +351,24 @@ def test_completely_masked_day_contributes_no_risk_score() -> None:
     panel = panel_fixture()
     panel["Y"][25] = np.nan
     slots, days, _, _ = ev.rolling_origin(bl.b0p_model(), panel, folds=("f1",))
+    slots = slots.with_columns((pl.col("y_true") + 2).alias("y_mean"),
+                               (pl.col("y_true") + 1).alias("y_median"))
+    days = days.with_columns((pl.col("M_true") + 2).alias("M_hat_mean"),
+                             (pl.col("M_true") + 1).alias("M_hat_median"))
     # When evaluating daily risk.
     measured = ev.point_metrics(slots, days, panel)
     # Then predictions may exist but the unknown event has no score weight.
     assert not days["usable_peak"][0] and np.isnan(days["event_C90"][0])
     row = measured.filter((pl.col("fold") == "f1") & (pl.col("stratum") == "all") & (pl.col("metric") == "brier_raw_C90"))
     assert row["n"][0] == 9
+    pooled = measured.filter((pl.col("fold") == "pooled") & (pl.col("stratum") == "all"))
+    scores = dict(pooled.select("metric", "value").iter_rows())
+    for prefix in ("", "peak_"):
+        assert scores[f"{prefix}r2"] == pytest.approx(.4)
+        assert scores[f"{prefix}rmse"] == 2
+        assert scores[f"{prefix}mae"] == 1
+        assert scores[f"{prefix}bias"] == 2
+        assert scores[f"{prefix}wape_pct"] == pytest.approx(100 / 130)
 
 
 def test_new_candidate_after_refresh_gets_explicit_optional_status() -> None:

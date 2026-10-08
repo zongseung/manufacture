@@ -56,12 +56,6 @@ def rate(ts: datetime, holiday: bool, option: Option = "II") -> float:
     return TARIFF[option][season_name(ts.month)][band(ts, holiday, True)]
 
 
-def energy_won(y: FloatArray, ts: Sequence[datetime], holidays: set[date], option: Option = "II") -> float:
-    """Sum finite quarter-hour average kW using the historical energy bands."""
-    return float(sum(0.25 * value * rate(t, t.date() in holidays, option)
-                     for value, t in zip(y, ts, strict=True) if np.isfinite(value)))
-
-
 def billing_demand(y: FloatArray, ts: Sequence[datetime], holidays: set[date]) -> float:
     return max((float(value) for value, t in zip(y, ts, strict=True)
                 if np.isfinite(value) and band(t, t.date() in holidays, False) >= 1), default=0.0)
@@ -69,19 +63,3 @@ def billing_demand(y: FloatArray, ts: Sequence[datetime], holidays: set[date]) -
 
 def _timestamps(day: date) -> list[datetime]:
     return [datetime.combine(day, time()) + timedelta(minutes=15 * q) for q in range(96)]
-
-
-def ratchet_floor(panel: Panel, month: int, exclude_dates: set[date], holidays: set[date]) -> tuple[float, datetime]:
-    """Return observed 2021 demand floor; zero/month-start means no eligible reading."""
-    # ponytail: 2020-12 자료 없음·계약전력 30% 하한 미적용·마스킹 점 제외로 래칫 바닥 계산, 실제 청구 이력이 오면 교체 (FR-85)
-    season_name(month)
-    best, at = 0.0, datetime(2021, month, 1)
-    months = {m for m in RATCHET_MONTHS if m <= month} | {month}
-    for d, day in enumerate(panel["dates"]):
-        if day.year != 2021 or day.month not in months or day in exclude_dates or day in holidays or day.weekday() == 6:
-            continue
-        for q, ts in enumerate(_timestamps(day)):
-            value = float(panel["Y"][d, q])
-            if np.isfinite(value) and value > best and band(ts, False, False) >= 1:
-                best, at = value, ts
-    return best, at

@@ -1,0 +1,102 @@
+{
+  "input_sha256": {
+    "results_v3/conditional_collapsed/seed0/oof_slots.csv": "3e86acbc9bda41f1a4cf778297b4ec0d5880ba9cd265cb1257b8d1f52400a5f7",
+    "results_v3/conditional_collapsed/seed0/peak_intervals.csv": "987dbe9077a17755c079f3983c218db1ad63625c7849a1c133aef91f468c58db",
+    "results_v3/extended_metrics/metrics.csv": "61e38aa327053b2f32d10339c74dd9ca9533632f06e890dc87c0e451dfcd0d8b",
+    "results_v3/conditional_collapsed/seed1/oof_slots.csv": "ac1a26308b68cae38da10196cac62849401f3a1700124474de7a756afebd8a1a",
+    "results_v3/conditional_collapsed/seed1/peak_intervals.csv": "b512557007cc726fc519754ab0c5af2f1587aa67de28bef93e41ba9ca921b38d",
+    "results_v3/conditional_collapsed/seed2/oof_slots.csv": "24477bafb29c0ded426a0b15605bfcf73dfc66d7fcd6c081c5137d37c8852b81",
+    "results_v3/conditional_collapsed/seed2/peak_intervals.csv": "4efd8c57ba7771fc520c4772d541e16d7d5b850b97960001caa0069ad6e5886d",
+    "results_v3/conditional_collapsed/jobs/seed0_f4_BAT_conditional_gaussian/posterior_trace.csv": "543c1d66551d63e8bfa3472ce4278a3be19717ad067b6c35454a9cbe7f22cdc2",
+    "results_v3/conditional_collapsed/jobs/seed1_f4_BAT_conditional_gaussian/posterior_trace.csv": "997c9979b790d9b200b2e80677dbe3e6e737d0020380abc2e5716e7054549ccd",
+    "results_v3/conditional_collapsed/jobs/seed2_f4_BAT_conditional_gaussian/posterior_trace.csv": "17a4f693da2f6f6e61e232afe04c06727e0b3b51786151da3b50ccf98e297d3f"
+  },
+  "code_sha256": {
+    "gmst/paper_figures.py": "251b3b3421147d6d75618958ba0831dd32bb5ef4aa3a99960809a6ecc1bec880",
+    "gmst/bat.py": "aa552136f4bd2081c2f754f8944da1917f93b78574f314cf44808bdc4aecfdca"
+  },
+  "pdfs": [
+    "conditional_forecasts.pdf",
+    "conditional_model_comparison.pdf",
+    "conditional_peak_strata.pdf",
+    "conditional_coverage.pdf",
+    "conditional_attention.pdf",
+    "conditional_noise.pdf"
+  ],
+  "examples": [
+    {
+      "stratum": "Nonop.",
+      "date": "2021.08.06",
+      "fold": "f3",
+      "daily_mae": 1.6851804246749016,
+      "C90": 210.10000000000002,
+      "M_true": 27.0
+    },
+    {
+      "stratum": "Op. \u2264 C90",
+      "date": "2021.07.16",
+      "fold": "f1",
+      "daily_mae": 8.411110248873406,
+      "C90": 198.0,
+      "M_true": 197.0
+    },
+    {
+      "stratum": "High peak",
+      "date": "2021.07.21",
+      "fold": "f2",
+      "daily_mae": 10.833068378519867,
+      "C90": 200.2,
+      "M_true": 214.0
+    }
+  ],
+  "example_seed": 0,
+  "example_selection": "Closest to stratum median daily slot MAE, finite pairs only; date breaks ties; usable peak dates only",
+  "intervals": [
+    {
+      "model": "BAT",
+      "target": "slot",
+      "coverage": 0.9505582137161085,
+      "width": 51.21594683072983,
+      "n": 5016,
+      "n_seeds": 1
+    },
+    {
+      "model": "BAT_pooled_gaussian",
+      "target": "slot",
+      "coverage": 0.9742822966507177,
+      "width": 60.40080632149233,
+      "n": 5016,
+      "n_seeds": 3
+    },
+    {
+      "model": "BAT_pooled_gaussian",
+      "target": "peak",
+      "coverage": 0.6732026143790849,
+      "width": 49.921432096510706,
+      "n": 51,
+      "n_seeds": 3
+    },
+    {
+      "model": "BAT_conditional_gaussian",
+      "target": "slot",
+      "coverage": 0.9905635300372143,
+      "width": 58.460980184592636,
+      "n": 5016,
+      "n_seeds": 3
+    },
+    {
+      "model": "BAT_conditional_gaussian",
+      "target": "peak",
+      "coverage": 0.9019607843137255,
+      "width": 48.767317213391,
+      "n": 51,
+      "n_seeds": 3
+    }
+  ],
+  "refitted": false,
+  "september_opened": false,
+  "seed_policy": "Mean of seed-specific metrics on identical days; baseline evaluated once; min/max bars are computational ranges, not confidence intervals",
+  "posterior": "f4 outer only, kind 2 attention, seeds separate; basic split-Rhat failed overall; boxplots 25/50/75%, whiskers 1.5 IQR; outliers hidden",
+  "high_peak": "Retrospective observed peak > training-fold C90; 13 days",
+  "coverage": "Finite observed slots; usable daily peaks; original BAT peak quantiles unavailable"
+}

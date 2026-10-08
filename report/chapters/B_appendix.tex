@@ -1,0 +1,68 @@
+\section{모형 세부 사항}
+\label{app:model}
+
+C-BAT의 모수는 표준화 단위에서 추정한다. 전력은 평균을 빼지 않고 학습 구간 표준편차 $s_y$로 나눈다. 생산량은 $q/q_{\max}$를 입력하는 것이 아니라 생산 여부와 $\log(1+q)/\log(1+q_{\max})$의 두 채널로 변환한다(식~\ref{eq:ch2-channels}). 표~\ref{tab:chB-prior}의 사전분포 값은 모두 이 단위 기준이다.
+
+\begin{table}[htbp]
+\centering
+\caption{C-BAT의 사전분포(표준화 단위). IG는 역감마(모양, 척도)다.}
+\label{tab:chB-prior}
+\small
+\begin{tabular}{ll}
+\toprule
+모수 & 사전분포 \\
+\midrule
+기본곡선 $\mu_{k,\cdot}$ & $\mathcal N\big(0,\ \tau_k(\mathbf R+10^{-4}\mathbf I)^{-1}\big)$, $\mathbf R$은 순환 RW2 정밀도 행렬 \\
+평활 분산 $\tau_k$ & $\mathrm{IG}(1,\ 0.01)$ \\
+기준일 계수 $\gamma_k$ & $\mathcal N(0,\ 5^2)$ \\
+로그 생산 이득 $\omega_{c,k}=\log w_{c,k}$, $k=1,2,3$ & $\mathcal N(\log 0.3,\ 1.5^2)$; 비가동일은 $w_{c,0}=0$ \\
+커널 형상 $(\log\sigma,\ \log\beta,\ \ell)$ & $(\log 1.5,\ \log 2,\ 0)$에 고정 \\
+날짜 효과 분산 $\sigma^2_{u,g}$ & $\mathrm{IG}(2,\ 0.01)$ \\
+혁신 분산 $\sigma^2_{\eta,g}$ & $\mathrm{IG}(2,\ 0.01)$ \\
+자기상관 $\rho_g$ & $\mathrm U[0,\ 0.98)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+커널 형상을 가동유형별로 학습하는 변형에서는 $(\log\sigma,\log\beta,\ell)$에 중심 $(\log1.5,\log2,0)$, 표준편차 $(0.5,\ 0.5,\ 1.0)$의 정규 사전분포를 둔다. 시간 가중치 $\omega_d$(식~\ref{eq:ch2-weight})는 관측 우도 전체에 적용하고 날짜 효과의 사전분포에는 적용하지 않는다(식~\ref{eq:ch2-weighted-posterior}). 혁신 분산의 조건부분포에서는 모양 모수에 관측 수 대신 가중치 합의 절반을 더한다.
+
+\subsection{조건부분포와 구현의 대응}
+
+결측 간격을 반영해 백색화한 관측을 $\boldsymbol b_k$, 기본곡선 96개와 기준일 계수의 설계행렬을 $\mathbf H_k$라 하자. $\boldsymbol b_k$는 표준화 전력에서 현재 생산 전달항과 날짜 효과를 뺀 뒤 백색화한 값이다. $\mathbf H_k$도 같은 계수로 백색화하며, 잡음 상태 $g=g(k)$에서 관측 $i$의 정밀도는 $\omega_{d(i)}/\sigma^2_{\eta,g}$이다. 따라서
+\begin{align}
+\mathbf W_k &= \operatorname{diag}\!\left(\frac{\omega_{d(i)}}{\sigma^2_{\eta,g}}\right),\qquad
+\mathbf R_\epsilon=\mathbf R+10^{-4}\mathbf I,\\
+\mathbf A_k &= \mathbf H_k^{\mathsf T}\mathbf W_k\mathbf H_k
++\operatorname{blockdiag}\!\left(\frac{\mathbf R_\epsilon}{\tau_k},\frac1{25}\right),\\
+\begin{pmatrix}\boldsymbol\mu_k\\\gamma_k\end{pmatrix}\Bigm|\text{나머지}
+&\sim\mathcal N\!\left(\mathbf A_k^{-1}\mathbf H_k^{\mathsf T}\mathbf W_k\boldsymbol b_k,\ \mathbf A_k^{-1}\right).
+\label{eq:chB-mean-conditional}
+\end{align}
+이 조건부분포가 코드의 97차원 Cholesky 표집에 대응한다. 로그 생산 이득의 제안에서는 이 평균 모수를 적분한 주변우도를 비교하고, 채택된 생산 이득으로 위 조건부분포를 다시 계산한다.
+
+분산의 조건부분포도 코드에서 사용한 역감마 모양·척도로 명시한다. $\mathcal I_g$는 잡음 상태 $g$의 관측 슬롯, $\mathcal T_g$는 해당 상태의 학습일이며, $\xi_i$는 기본곡선·기준일·전달항·날짜 효과를 모두 뺀 잔차를 백색화한 값이다.
+\begin{align}
+\tau_k\mid\text{나머지}
+&\sim\mathrm{IG}\!\left(49,\ 0.01+\tfrac12\boldsymbol\mu_k^{\mathsf T}\mathbf R_\epsilon\boldsymbol\mu_k\right),\\
+\sigma^2_{\eta,g}\mid\text{나머지}
+&\sim\mathrm{IG}\!\left(2+\tfrac12\sum_{i\in\mathcal I_g}\omega_{d(i)},\
+0.01+\tfrac12\sum_{i\in\mathcal I_g}\omega_{d(i)}\xi_i^2\right),\\
+\sigma^2_{u,g}\mid\text{나머지}
+&\sim\mathrm{IG}\!\left(2+\tfrac12|\mathcal T_g|,\
+0.01+\tfrac12\sum_{d\in\mathcal T_g}u_d^2\right).
+\label{eq:chB-variance-conditionals}
+\end{align}
+백색화는 결측 간격 $s$에 대해 $\phi_i=\rho_g^s$, $c_i=\sqrt{(1-\rho_g^2)/(1-\phi_i^2)}$를 사용해 $\xi_i=c_i(e_i-\phi_i e_{\mathrm{prev}(i)})$로 계산한다. 그날 첫 관측은 $\phi_i=0$이며 정상분포에 맞게 $c_i=\sqrt{1-\rho_g^2}$가 된다. 이 식의 분산들은 표준화 단위이고, 예측 경로에서는 전체에 $s_y$를 곱한다.
+
+\subsection{표집 순서와 초기값}
+
+한 번의 반복은 다음 순서로 진행한다.
+\begin{enumerate}
+\item 현재 $\rho_g$로 결측 간격을 반영한 AR(1) 백색화 계수(식~\ref{eq:ch2-gap})를 계산한다.
+\item 가동유형 $k=1,2,3$마다 두 로그 이득 $\omega_{\cdot,k}$에 보폭 0.5의 정규 랜덤워크를 제안하고, $(\mu_{k,\cdot},\gamma_k)$를 적분한 주변우도와 사전분포로 채택 여부를 정한다. 학습 자료에 그 유형이 없으면 사전분포에서 뽑는다.
+\item 가동유형마다 $(\mu_{k,\cdot},\gamma_k)$를 결합 정규 조건부분포에서 Cholesky 분해로 한꺼번에 뽑는다.
+\item 평활 분산 $\tau_k$를 역감마 조건부분포에서 뽑는다.
+\item 날짜 효과 $u_d$를 켤레 정규 조건부분포에서 뽑는다.
+\item 잡음 상태 $g$마다 $\rho_g$를 보폭 0.04의 랜덤워크 Metropolis로 갱신하고, $\sigma^2_{\eta,g}$와 $\sigma^2_{u,g}$를 역감마 조건부분포에서 뽑는다.
+\end{enumerate}
+6,000회를 반복해 앞 3,000회를 버리고, 남은 3,000개를 사후표본으로 저장한다. 초기값은 $\omega_{c,k}=\log0.3$, $\mu_{k,\cdot}$는 가동유형별 학습 평균 곡선, $\gamma_k=0$, $\rho_g=0.5$이다.

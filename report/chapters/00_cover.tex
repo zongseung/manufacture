@@ -1,0 +1,58 @@
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+{\large 일반국민/대학(원)생 부문}\par\vspace{4mm}
+{\Large\bfseries 제6회 K-인공지능 제조데이터 분석 경진대회 보고서}\par\vspace{12mm}
+\renewcommand{\arraystretch}{1.6}
+\begin{tabular}{|p{0.18\linewidth}|p{0.72\linewidth}|}
+\hline
+\textbf{프로젝트명} & 생산계획 기반 조건부 베이지안 전달모형(C-BAT)을 이용한 제조공장 전력 예측과 최대피크 위험조건 분석 \\
+\hline
+\textbf{팀명} & \rule{5cm}{0.4pt} \\
+\hline
+\textbf{내용요약} &
+\small 제조공장의 하루 96개 15분 슬롯 전력을 매일 00:00에 그날의 시간별 생산계획, 달력, 전날까지의 관측 전력만으로 예측하고, 최대피크 위험과 요금에 영향을 주는 날을 가려내는 방법을 제안한다.
+제안 모형 C-BAT은 가동유형별 기본곡선, 과거 기준일 곡선, 생산계획의 전달항, 가동 여부에 따라 달라지는 잡음을 베이지안으로 함께 추정하고, 예측 경로에서 피크 분포와 초과확률을 계산한다.
+완전·편집 복사일 122일을 목표에서 제외하고 시간순 검증을 설계하였다.
+개발 구간(2021-07-07\,--\,08-31)과 9월 1--14일을 합친 평가는 67일·6,358슬롯이며 피크 평가일은 65일이다.
+합산 피크 MAE는 C-BAT 8.93\,kW, 기존 BAT 13.09\,kW, LightGBM 기본 모형 M2 14.54\,kW로, C-BAT가 각각 31.8\%, 38.6\% 낮았다. 날짜 bootstrap 95\% 구간에서도 두 개선이 확인되었다.
+합산 슬롯 MAE는 C-BAT 8.22\,kW, 기존 BAT 7.61\,kW, M2 10.57\,kW였다. 개발 구간 고피크일 13일의 피크 MAE는 C-BAT 4.37\,kW, 튜닝 LightGBM 18.27\,kW였다.
+월 최대 갱신 경보는 개발 구간 백테스트에서 유일한 갱신일을 포착했으나 경보 10회 중 9회가 오경보였다. 금액 133,120원은 완벽 조치의 상한이며 실제 절감액은 아니다. \\
+\hline
+\end{tabular}
+\vfill
+\begin{flushleft}
+\small 상기 본인(팀)은 위의 내용과 같이 제6회 K-인공지능 제조데이터 분석 경진대회 결과 보고서를 제출합니다.
+\end{flushleft}
+\vspace{6mm}
+{2026년 \quad 10월 \quad\quad 일}\par\vspace{8mm}
+\begin{flushright}
+팀장 : \rule{3.5cm}{0.4pt} (서명)\\[3mm]
+팀원 : \rule{3.5cm}{0.4pt} (서명)\\[3mm]
+팀원 : \rule{3.5cm}{0.4pt} (서명)
+\end{flushright}
+\vspace{10mm}
+{\large (사)중소기업기술혁신협회 귀중}
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\section*{평가 항목과 보고서 구성}
+\addcontentsline{toc}{section}{평가 항목과 보고서 구성}
+보고서의 장은 공식 평가 항목과 아래와 같이 대응한다.
+
+\begin{center}
+\small
+\begin{tabular}{p{0.26\linewidth}p{0.25\linewidth}p{0.38\linewidth}}
+\toprule
+평가 항목 (배점) & 보고서 위치 & 주요 내용 \\
+\midrule
+1. 데이터 이해 및 진단 (15) & 3장 & 변수, 전처리 구조, 복사일·결측, 누수 진단, 검증 설계 \\
+2. AI 예측모델 개발 및 성능평가 (40) & 2장, 4.1--4.2절, 4.6--4.7절 & 방법론, 비교 모델, 성능, 절제, 9월 시험, 최종 선택 \\
+3. 영향요인 및 오류분석 (15) & 4.3--4.5절 & 오차·피크 발생 조건, 미탐지·오경보, 입력 오차 \\
+4. 현장 활용방안 (10) & 5장 & 월 최대 갱신 경보, 백테스트, 현장 검증 \\
+5. 창의성 및 차별성 (10) & 6.1절 & 선행 방법 대비 차별점과 효과 \\
+6. 코드 및 재현성 (10) & 부록 A & 한 줄 실행, 재현 명령, 누수 점검 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\clearpage

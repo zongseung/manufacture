@@ -1,0 +1,426 @@
+\hwpchapter{2}{AI 예측모델 개발 및 성능평가}{40}
+
+제안모형 C-BAT는 시간별 생산계획을 15분 슬롯 전력으로 옮기는 조건부 베이지안 전달모형이다. 이 장은 C-BAT의 수식, 기호, 모수와 추정 방법(2.1절), 비교모델과 공통 평가조건(2.2절), 모델별 성능과 최종모델 선정 근거(2.3절)를 차례로 제시한다. 주 성능은 개발 구간과 9월 시험 구간을 합친 합산 평가(67일, 6,358슬롯, 피크 평가일 65일)로 보고하고, 모델 선택과 절제 비교는 개발 구간(53일, 5,016슬롯, 피크 평가일 51일)에서 수행하였다.
+
+\hwpsection{2.1 제안모형 C-BAT의 구조와 추정}
+
+예측 과제는 예측일 $d$의 00:00에 그날 96개 슬롯의 전력 $y_{d,t}$($t=1,\dots,96$)를 한꺼번에 내는 것이다. 이 시점에 쓰는 정보는 그날의 시간별 생산계획 $q_{d,h}$($h=0,\dots,23$), 가동 여부와 날짜유형(평일·토요일·일요일), 그리고 $d-1$일까지 관측된 전력뿐이며, 예측일 당일의 전력은 한 슬롯도 쓰지 않는다(1.4절). C-BAT는 점예측 하나가 아니라 하루 96슬롯 전력 경로의 예측분포를 내고, 이 분포에서 다음 세 산출물을 얻는다.
+\begin{hwplist}
+\item 슬롯 예측: 슬롯별 분위수(5\%에서 95\%까지 5\% 간격)와 점예측(중앙값).
+\item 일 피크 분포: 일 피크 $M_d=\max_t y_{d,t}$의 예측분포와 그 중앙값.
+\item 피크 초과확률: 학습 기간에서 정한 피크 기준 $C\in\{C_{50},C_{75},C_{90}\}$에 대한 $P(M_d>C)$.
+\end{hwplist}
+슬롯마다 따로 만든 분위수로는 하루 최댓값의 분포를 얻을 수 없으므로, 하루 곡선 전체를 한꺼번에 표집하는 구조로 설계하였다. 그림~\ref{fig:ch2-structure}은 입력에서 산출물까지의 흐름이다.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\footnotesize, >=latex,
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, minimum height=9mm},
+  inp/.style={box, fill=gray!8, text width=3.0cm},
+  mid/.style={box, fill=blue!6, text width=3.4cm},
+  pth/.style={box, fill=blue!12, text width=3.6cm},
+  outp/.style={box, fill=green!7, text width=3.0cm}]
+\node[inp] (q) at (0,1.5) {당일 시간별 생산계획\\$q_{d,h}$, 가동유형 $k$};
+\node[inp] (r) at (0,0) {기준일 곡선 $r_{d,t}$\\($d-1$일까지의 전력)};
+\node[inp] (g) at (0,-1.5) {잡음 상태 $g$\\(비가동 / 가동)};
+\node[mid] (m) at (4.3,0.75) {평균 곡선 $m_{d,t}$\\기본곡선 $\mu_{k,t}$ + 기준일 항\\+ 생산 전달항};
+\node[mid] (n) at (4.3,-1.5) {상태별 잡음\\날짜 효과 $u_d$ + AR(1) $e_{d,t}$};
+\node[pth] (p) at (8.5,-0.4) {사후 경로 3,000개\\$\tilde y^{(s)}_{d,t}=s_y(m+u+e)$\\(음수는 0으로 절단)};
+\node[outp] (o1) at (12.6,1.1) {슬롯 분위수\\점예측(중앙값)};
+\node[outp] (o2) at (12.6,-0.4) {일 피크 분포\\$\tilde M^{(s)}_d=\max_t \tilde y^{(s)}_{d,t}$};
+\node[outp] (o3) at (12.6,-1.9) {피크 초과확률\\$P(M_d>C)$};
+\node[box, fill=orange!8, text width=6.0cm] (e) at (3.3,-3.3) {학습 기간 추정(반감기 30일 시간 가중)\\Gibbs--Metropolis 6,000회, 앞 3,000회 제외\\$\Rightarrow$ 사후표본 $\Theta^{(s)}$, $s=1,\dots,3{,}000$};
+\draw[->] (q) -- (m);
+\draw[->] (r) -- (m);
+\draw[->] (g) -- (n);
+\draw[->] (m) -- (p);
+\draw[->] (n) -- (p);
+\draw[->] (p) -- (o1);
+\draw[->] (p) -- (o2);
+\draw[->] (p) -- (o3);
+\draw[->] (e.east) -| node[pos=0.25, above] {표본마다 경로 1개} (p.south);
+\end{tikzpicture}
+\caption{C-BAT의 구조. 생산계획과 기준일 곡선이 평균 곡선을 정하고, 가동 상태별 잡음을 더한 사후 경로 묶음에서 세 산출물을 모두 계산한다.}\label{fig:ch2-structure}
+\end{figure}
+
+학습 기간의 관측 전력 표준편차 $s_y$로 전력을 나누어 $z_{d,t}=y_{d,t}/s_y$로 변환하였다(평균은 빼지 않는다). 표준화 전력은 평균 곡선 세 항과 변동 두 항의 합이다.
+\begin{equation}
+z_{d,t} \;=\; \underbrace{\mu_{k,t}}_{\text{기본곡선}}
+\;+\; \underbrace{\gamma_k\, r_{d,t}}_{\text{기준일}}
+\;+\; \underbrace{\sum_{c\in\{\mathrm{on},\,\log\}} w_{c,k} \sum_{h=0}^{23} \alpha_{t,h}\, x_c(q_{d,h})}_{\text{생산 전달항}}
+\;+\; \underbrace{u_d}_{\text{날짜 효과}}
+\;+\; \underbrace{e_{d,t}}_{\text{슬롯 잡음}}
+\label{eq:ch2-cbat}
+\end{equation}
+$k$는 예측일 $d$의 가동유형이다. 앞의 세 항은 생산계획과 최근 운전 상태가 정하는 평균 곡선 $m_{d,t}$이고 뒤의 두 항은 그 주변의 변동이다. 이름의 C(conditional)는 변동의 크기와 지속성을 가동 상태별로 따로 두는 데서 붙였다. 예측할 때에는 식의 오른쪽 전체에 $s_y$를 곱해 kW로 되돌린다. $s_y$와 생산량 정규화 기준 $q_{\max}$는 해당 학습 기간에서만 계산하며, 검증일이나 9월 자료로 갱신하지 않는다. 사용한 기호는 표~\ref{tab:ch2-notation}에 정리하였다.
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\caption{C-BAT의 주요 기호.}\label{tab:ch2-notation}
+\begin{tabular}{L{4.4cm}L{11.2cm}}
+\toprule
+기호 & 의미 \\
+\midrule
+$d$, $t=1,\dots,96$, $h=0,\dots,23$ & 예측일, 15분 슬롯, 생산계획의 시각 \\
+$y_{d,t}$, $s_y$, $z_{d,t}=y_{d,t}/s_y$ & 슬롯 전력(kW), 학습 기간 관측 전력의 표준편차, 표준화 전력 \\
+$q_{d,h}$, $q_{\max}$ & 시간별 생산계획량, 학습 기간의 시간별 최대 생산량 \\
+$k\in\{0,1,2,3\}$ & 가동유형(계획 생산시간 0시간 / 1--12시간 / 13--19시간 / 20시간 이상) \\
+$g\in\{\text{비가동},\text{가동}\}$ & 잡음 상태($k=0$이면 비가동, $k\ge1$이면 가동) \\
+$\mu_{k,t}$, $\tau_k$ & 가동유형별 기본곡선(표준화 단위)과 그 평활 분산 \\
+$r_{d,t}$, $\gamma_k$ & 표준화한 기준일 곡선과 그 계수 \\
+$x_c(q)$, $c\in\{\mathrm{on},\log\}$ & 생산 채널(생산 여부, 정규화 로그 생산량) \\
+$w_{c,k}=e^{\omega_{c,k}}$ & 채널·가동유형별 생산 이득(양수), $\omega_{c,k}$는 그 로그 \\
+$\alpha_{t,h}$, $\Delta_{t,h}$ & 시간 계획을 슬롯으로 옮기는 커널 가중치, 슬롯 $t$와 시각 $h$의 중앙 시각 차이(시간) \\
+$\sigma$, $\beta$, $\ell$ & 커널의 척도, 형상, 시차(코드의 $c$) \\
+$u_d$, $\sigma_{u,g}$ & 날짜 효과와 그 표준편차 \\
+$e_{d,t}$, $\rho_g$, $\sigma_{\eta,g}$ & 슬롯 AR(1) 잡음, 자기상관, 혁신 표준편차 \\
+$\kappa_d$, $\mathcal T$, $\mathcal O_d$ & 반감기 시간 가중치, 유효 학습일 집합, $d$일의 관측 슬롯 집합 \\
+$m_{d,t}$, $\tilde y^{(s)}_{d,t}$, $S$ & 평균 곡선(식~\ref{eq:ch2-cbat}의 앞 세 항), 사후표본 $s$의 예측 경로, 경로 수($S=3{,}000$) \\
+$M_d$, $\tilde M^{(s)}_d$ & 일 피크 $\max_t y_{d,t}$, 경로 $s$의 하루 최댓값 \\
+$C_{50}$, $C_{75}$, $C_{90}$ & 학습 기간 가동일 일 피크의 50·75·90\% 분위수(피크 기준) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+가동유형 $k$는 그날 계획에서 생산량이 양수인 시간 수로 정하므로 00:00에 알 수 있다. 기본곡선, 기준일 계수, 생산 이득은 가동유형마다 따로 두었다. 운전 시간이 다른 날은 하루 곡선의 모양 자체가 다르기 때문이다. 기본곡선 $\mu_{k,t}$는 가동유형별 하루 평균 모양을 맡으며 96개 값에 순환 2차 확률보행(RW2) 사전분포를 두었다. 인접 슬롯의 이차 차분 $\mu_{k,t+1}-2\mu_{k,t}+\mu_{k,t-1}$에 벌점을 주고 슬롯 96과 슬롯 1을 이어 자정 전후도 매끄럽게 하였다. 평활 분산 $\tau_k$도 유형마다 추정하므로 자료가 적은 유형의 곡선은 더 매끄럽게 수축된다.
+
+기준일 곡선 $r_{d,t}$는 최근 공장 상태를 평균에 반영한다. 기준일은 예측일 이전 28일 안에서 가동 여부와 날짜유형이 모두 같은 완전 관측일(96슬롯 모두 관측) 가운데 가장 최근 날이며, 그날 전력을 $s_y$로 나누어 $r_{d,t}$를 만든다. 28일 안에 그런 날이 없으면 전체 과거에서 가동 여부만 같은 가장 최근 완전 관측일을, 그것도 없으면 학습 기간의 해당 가동유형 평균 곡선을 쓴다. 계수 $\gamma_k$는 기준일 곡선을 얼마나 따를지 정한다. 기본곡선이 학습 기간 전체의 평균 모양을 맡는다면 기준일 항은 계절에 따라 움직이는 최근 수준을 따라간다.
+
+생산 전달항은 시간별 생산계획을 슬롯 전력의 증가분으로 옮긴다. 계획량은 두 채널로 바꾼다.
+\begin{equation}
+x_{\mathrm{on}}(q)=\mathbf 1[q>0],\qquad
+x_{\log}(q)=\frac{\log(1+q)}{\log(1+q_{\max})}.
+\label{eq:ch2-channels}
+\end{equation}
+첫 채널은 라인이 도는지를, 둘째 채널은 생산량의 크기를 나타낸다. 이득은 $w_{c,k}=\exp(\omega_{c,k})$로 두어 양수로 제약하였다. 따라서 가동유형과 기준일이 같은 상태에서 생산량만 늘리면 전달항은 줄지 않는다. 다만 생산시간이 바뀌어 가동유형이 달라지면 기본곡선과 계수도 바뀌므로 전체 예측의 단조성까지 보장하지는 않는다. 비가동일($k=0$)에는 생산이 없으므로 전달항을 두지 않는다($w_{c,0}=0$).
+
+시간 계획을 슬롯으로 옮기는 가중치 $\alpha_{t,h}$는 다음의 고정 sparsemax 커널이다.
+\begin{equation}
+\alpha_{t,\cdot} = \operatorname{sparsemax}\!\left(-\frac{\lvert \Delta_{t,h} - \ell\rvert^{\beta}}{\sigma}\right)_{h=0,\dots,23},
+\qquad \Delta_{t,h}=\frac{t-4h-2.5}{4},
+\qquad (\sigma,\beta,\ell)=(1.5,\ 2,\ 0).
+\label{eq:ch2-kernel}
+\end{equation}
+$\Delta_{t,h}$는 슬롯 $t$의 중앙 시각과 시각 $h$의 중앙 시각의 차이(시간 단위)다. sparsemax는 점수 벡터 $\boldsymbol v$를 확률 단체에 유클리드 사영하는 변환으로 $\operatorname{sparsemax}(\boldsymbol v)_h=\max\{v_h-\tau(\boldsymbol v),0\}$이며, $\tau(\boldsymbol v)$는 가중치 합을 1로 맞추는 문턱값이다. 그래서 먼 시각의 가중치는 정확히 0이 된다. 척도 $\sigma=1.5$, 형상 $\beta=2$, 시차 $\ell=0$시간은 사전분포의 중심값에 고정한 값이며 검증 점수를 보고 고르지 않았다($\sigma$는 점수 함수의 척도이고 잡음의 표준편차가 아니다). 이 값에서 첫 슬롯과 마지막 슬롯은 한 시각, 나머지 94개 슬롯은 인접한 두 시각에만 가중치를 둔다. 예컨대 00:30--00:45 슬롯은 0시 계획에 0.75, 1시 계획에 0.25를 두고, 00:45--01:00 슬롯은 0.58과 0.42를 둔다. 즉 각 슬롯의 전달 입력은 가까운 두 시각 계획의 가중 평균이며 시차는 없다.
+
+날짜 효과와 슬롯 잡음은 잡음 상태 $g$마다 따로 두었다.
+\begin{equation}
+u_d \sim \mathcal N\big(0,\ \sigma^2_{u,g}\big),
+\qquad
+e_{d,t} = \rho_g\, e_{d,t-1} + \eta_{d,t},\quad \eta_{d,t}\sim \mathcal N\big(0,\ \sigma^2_{\eta,g}\big).
+\label{eq:ch2-noise}
+\end{equation}
+날짜 효과 $u_d$는 하루 전체를 함께 올리거나 내리는 변동이고, $e_{d,t}$는 슬롯 사이에 이어지는 1차 자기회귀 잡음이다. 하루 첫 슬롯은 정상분포 $\mathcal N\big(0,\sigma^2_{\eta,g}/(1-\rho_g^2)\big)$에서 시작한다. 조용한 비가동일과 생산 부하가 오르내리는 가동일은 변동의 크기와 지속 시간이 다르다. 두 상태가 같은 잡음을 공유하면 비가동일 경로가 가동일 수준으로 흔들려 비가동일의 일 피크가 과대평가되므로 잡음을 상태별로 나누었다.
+
+우도는 관측된 슬롯만으로 계산하고 결측 슬롯은 대체하지 않는다. 같은 날 관측 슬롯 $t$와 바로 앞 관측 슬롯 $t-s$ 사이에 $s-1$개 슬롯이 비어 있으면 AR(1)의 $s$단계 전이분포를 쓴다.
+\begin{equation}
+e_{d,t} \mid e_{d,t-s} \;\sim\; \mathcal N\!\left(\rho_g^{\,s}\, e_{d,t-s},\ \ \sigma^2_{\eta,g}\,\frac{1-\rho_g^{\,2s}}{1-\rho_g^{\,2}}\right).
+\label{eq:ch2-gap}
+\end{equation}
+그날의 첫 관측 슬롯은 정상분포에서 나온다고 둔다. 결측이 없는 날에는 식~\eqref{eq:ch2-noise}의 우도와 같아지고, 결측 구간이 잡음 추정을 왜곡하지 않는다.
+
+모수는 시간 가중 우도를 쓰는 Gibbs--Metropolis 표집으로 추정하였다. 날짜 $d$의 관측은 우도에서 다음 가중치를 받는다.
+\begin{equation}
+\kappa_d = 2^{-(d_{\max}-d)/30},\qquad
+\pi(\Theta,\boldsymbol u\mid\boldsymbol z)
+\;\propto\;\pi(\Theta)\prod_{d\in\mathcal T}
+p(u_d\mid\Theta)\,
+p(\boldsymbol z_{d,\mathcal O_d}\mid\Theta,u_d)^{\kappa_d}.
+\label{eq:ch2-weight}
+\end{equation}
+$d_{\max}$는 전력이 하나 이상 관측된 학습일의 마지막 날이며, 30일 전 자료의 가중치는 절반이다. $\Theta$는 날짜 효과를 제외한 모수다. 가중치는 AR(1) 우도 전체(정규화항 포함)에 지수로 적용하고 날짜 효과의 사전분포에는 곱하지 않는다. 공장 전력 수준이 계절에 따라 움직이므로 모든 날을 같은 무게로 두면 최근 수준을 따라가지 못하기 때문이다. 한 번의 반복은 다음 순서로 진행한다.
+\begin{hwplist}
+\item 백색화: 현재 $\rho_g$와 결측 간격 $s$로 AR(1) 백색화 계수($\phi=\rho_g^s$, 첫 관측은 $\phi=0$)를 계산한다.
+\item 생산 이득: 가동유형 $k=1,2,3$마다 두 로그 이득 $\omega_{\cdot,k}$에 보폭 0.5의 정규 랜덤워크를 제안하고, 평균 모수 $(\boldsymbol\mu_k,\gamma_k)$를 적분한 주변우도와 사전분포로 Metropolis 채택 여부를 정한다. 학습 자료에 그 유형이 없으면 사전분포에서 뽑는다.
+\item 평균 블록: 가동유형마다 기본곡선 96개와 기준일 계수를 합친 97차원 벡터를 결합 정규 조건부분포에서 Cholesky 분해로 한꺼번에 뽑는다(식~\ref{eq:ch2-mean-block}).
+\item 분산과 날짜 효과: 평활 분산 $\tau_k$를 역감마 조건부분포 $\mathrm{IG}\big(49,\ 0.01+\tfrac12\boldsymbol\mu_k^{\mathsf T}\mathbf R_\epsilon\boldsymbol\mu_k\big)$에서, 날짜 효과 $u_d$를 사전분포와 그날 백색화 잔차의 가중 우도를 결합한 켤레 정규분포에서 뽑는다.
+\item 잡음 모수: 잡음 상태마다 $\rho_g$를 보폭 0.04의 랜덤워크 Metropolis로 갱신하고($[0,\,0.98)$ 밖의 제안은 기각), $\sigma^2_{\eta,g}$와 $\sigma^2_{u,g}$를 켤레 역감마 조건부분포에서 뽑는다. $\sigma^2_{\eta,g}$의 모양 모수에는 관측 수 대신 가중치 합의 절반을 더한다.
+\end{hwplist}
+평균 블록의 조건부분포는 백색화한 설계행렬 $\mathbf H_k$, 백색화 목표 $\boldsymbol b_k$(표준화 전력에서 전달항과 날짜 효과를 뺀 값), 관측 정밀도 $\mathbf W_k=\operatorname{diag}(\kappa_{d(i)}/\sigma^2_{\eta,g})$로 다음과 같다.
+\begin{equation}
+\begin{split}
+\begin{pmatrix}\boldsymbol\mu_k\\\gamma_k\end{pmatrix}\Bigm|\text{나머지}
+&\sim\mathcal N\!\left(\mathbf A_k^{-1}\mathbf H_k^{\mathsf T}\mathbf W_k\boldsymbol b_k,\ \mathbf A_k^{-1}\right),\\
+\mathbf A_k &= \mathbf H_k^{\mathsf T}\mathbf W_k\mathbf H_k
++\operatorname{blockdiag}\!\left(\frac{\mathbf R_\epsilon}{\tau_k},\ \frac1{25}\right),\qquad
+\mathbf R_\epsilon=\mathbf R+10^{-4}\mathbf I.
+\end{split}
+\label{eq:ch2-mean-block}
+\end{equation}
+$\mathbf R$은 순환 RW2 정밀도 행렬이다. 표집은 6,000회 반복하고 앞 3,000회를 버려 남은 3,000개 사후표본을 예측 경로 3,000개로 쓴다. 초기값은 $\omega_{c,k}=\log0.3$, $\mu_{k,\cdot}$는 가동유형별 학습 평균 곡선, $\gamma_k=0$, $\rho_g=0.5$이다. 수렴은 시드 0--2의 세 사슬로 기본 split-$\hat R$을 계산해 점검하였다. 상수 모수를 뺀 22개 모수의 최댓값은 1.029로, 개발 구간 네 검증 구간의 모든 적합 단계에서 기준 1.05를 넘은 모수가 없었다. 이 진단은 순위 정규화 $\hat R$이나 꼬리 유효표본 수 진단이 아니므로 수렴의 충분조건은 아니다. 모수의 고정값과 사전분포는 표~\ref{tab:ch2-params}에 모았다.
+
+{\hwptablefont
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{L{1.8cm}L{2.8cm}L{1.6cm}L{4.0cm}L{5.2cm}}
+\caption{C-BAT의 모수. IG는 역감마(모양, 척도)이며 값은 표준화 단위이다.}\label{tab:ch2-params}\\
+\toprule
+기호 & 의미 & 고정/추정 & 값 또는 사전분포 & 근거·코드 \\
+\midrule
+\endfirsthead
+\caption[]{C-BAT의 모수(계속).}\\
+\toprule
+기호 & 의미 & 고정/추정 & 값 또는 사전분포 & 근거·코드 \\
+\midrule
+\endhead
+\midrule
+\multicolumn{5}{r}{\footnotesize 다음 쪽에 계속}\\
+\endfoot
+\bottomrule
+\endlastfoot
+$s_y$, $q_{\max}$ & 전력 척도, 생산량 정규화 기준 & 학습 자료로 계산 & 학습 기간 관측 전력의 표준편차, 시간별 최대 생산량 & 검증 구간마다 다시 계산. \texttt{fit\_conditional} \\
+$\mu_{k,\cdot}$ & 가동유형별 기본곡선 & 추정 & $\mathcal N\big(0,\ \tau_k\mathbf R_\epsilon^{-1}\big)$, 순환 RW2 & 인접 슬롯과 자정 전후를 매끄럽게 연결. \texttt{bat.\_rw2} \\
+$\tau_k$ & 평활 분산 & 추정 & $\mathrm{IG}(1,\ 0.01)$ & 유형별 평활 강도를 자료로 결정 \\
+$\gamma_k$ & 기준일 계수 & 추정 & $\mathcal N(0,\ 5^2)$ & 약한 정보 사전분포 \\
+$\omega_{c,k}$ ($k=1,2,3$) & 로그 생산 이득 & 추정 & $\mathcal N(\log0.3,\ 1.5^2)$, 제안 보폭 0.5 & $w=e^{\omega}>0$이면 생산이 늘 때 전달항이 줄지 않음. \texttt{bat.PRIOR\_MU}, \texttt{PRIOR\_SD} \\
+$w_{c,0}$ & 비가동일 이득 & 고정 & 0 & 비가동일에는 생산이 없음 \\
+$\sigma$, $\beta$, $\ell$ & 커널 척도·형상·시차 & 고정 & 1.5, 2, 0시간 & 사전분포 중심값. 학습형 커널은 수렴 기준 미달(최대 $\hat R$ 1.308, 2.3절). \texttt{fixed\_attention=True} \\
+$\sigma^2_{u,g}$ & 날짜 효과 분산 & 추정 & $\mathrm{IG}(2,\ 0.01)$ & 잡음 상태별 \\
+$\sigma^2_{\eta,g}$ & 혁신 분산 & 추정 & $\mathrm{IG}(2,\ 0.01)$ & 잡음 상태별 \\
+$\rho_g$ & AR(1) 자기상관 & 추정 & $\mathrm U[0,\ 0.98)$, 제안 보폭 0.04 & 정상성 보장 \\
+반감기 & 시간 가중 $\kappa_d$ & 고정 & 30일 & 최근 전력 수준 추종. \texttt{half\_life=30} \\
+기준일 규칙 & $r_{d,t}$의 선택 & 고정 & 28일 이내, 가동 여부·날짜유형 일치 & B0$'$ 규칙과 같음. \texttt{ref="op"}, \texttt{b0p\_ref} \\
+표집 & 반복·제외 횟수 & 고정 & 6,000회, 앞 3,000회 제외 & 최종 실행 인자(\texttt{main.py}). 코드 기본값은 2,000회·1,000회 \\
+$C_{50}$, $C_{75}$, $C_{90}$ & 피크 기준 & 학습 자료로 계산 & 가동일·결측 4슬롯 이하 일 피크의 50·75·90\% 분위수 & 검증 구간마다 다시 계산. \texttt{evaluate.py}의 \texttt{thresholds} \\
+\end{longtable}}
+\hwpnote{코드는 \path{gmst/conditional_bat.py}(적합·예측), \path{gmst/bat.py}(커널, 채널, 사전분포 중심값, 기준일), \path{gmst/conditional_ar.py}(결측 간격 백색화)에 있다.}
+
+추정된 잡음 모수는 상태를 나눈 이유를 보여 준다(그림~\ref{fig:ch2-noise}). 개발 구간 네 검증 구간과 시드 0--2의 사후표본을 모으면, 슬롯 혁신 표준편차의 중앙값은 비가동 1.60 kW, 가동 8.37 kW로 가동 상태가 약 다섯 배 크고, 자기상관 $\rho_g$의 중앙값은 각각 0.78과 0.91이다. 날짜 효과 표준편차의 중앙값은 2.73 kW와 3.64 kW로 차이가 작다.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{noise_state.pdf}
+\caption{잡음 상태별 사후분포(개발 구간 f1--f4, 시드 0--2의 사후표본 합산). 왼쪽부터 날짜 효과 표준편차(Day SD), 슬롯 혁신 표준편차(Innov.\ SD), AR(1) 자기상관($\rho$)이며 Nonop은 비가동, Op은 가동 상태이다. 상자는 25·50·75\% 분위수, 수염은 사분위범위의 1.5배이다.}\label{fig:ch2-noise}
+\end{figure}
+
+예측분포는 사후표본마다 하루 경로 하나를 만들어 얻는다. 사후표본 $s=1,\dots,S$의 모수로 예측일 계획에서 평균 곡선 $m^{(s)}_{d,t}$를 계산하고, 새 날짜 효과와 AR(1) 잡음을 더한다.
+\begin{equation}
+\tilde y^{(s)}_{d,t} = \max\!\Big\{0,\ s_y\big(m^{(s)}_{d,t} + u^{(s)}_d + e^{(s)}_{d,t}\big)\Big\},
+\qquad u^{(s)}_d\sim\mathcal N\big(0,\sigma^{2(s)}_{u,g}\big),\quad
+e^{(s)}_{d,t}=\rho^{(s)}_g e^{(s)}_{d,t-1}+\eta^{(s)}_{d,t}.
+\label{eq:ch2-path}
+\end{equation}
+잡음 상태 $g$는 그날 계획의 가동유형으로 정하고, 전력은 음수가 될 수 없으므로 0에서 자른다. 난수 시드는 예측 날짜로 정해 같은 입력에서 같은 경로가 나온다. 점예측은 슬롯별 경로 중앙값이고, 분위수는 경로의 5--95\% 분위수(q05--q95)이다. 일 피크의 분포는 경로마다 구한 최댓값 $\tilde M^{(s)}_d=\max_t \tilde y^{(s)}_{d,t}$의 분포이며 피크 점예측은 그 중앙값이다. 이 값은 슬롯별 중앙값 곡선의 최댓값과 일반적으로 다르다. 피크 초과확률은 최댓값이 기준을 넘는 경로의 비율이다.
+\begin{equation}
+\hat P(M_d > C) = \frac1S\sum_{s=1}^{S}\mathbf 1\big[\tilde M^{(s)}_d > C\big],
+\qquad C\in\{C_{50},C_{75},C_{90}\}.
+\label{eq:ch2-risk}
+\end{equation}
+피크 기준 $C_{50},C_{75},C_{90}$은 학습 기간 가동일 가운데 결측 슬롯이 4개 이하인 날의 관측 일 피크의 50·75·90\% 분위수이며 학습 기간이 바뀌면 다시 계산한다. 발행 시에는 96슬롯 전체에서 경로 최댓값을 구하고, 채점 시에는 관측 슬롯에 대응하는 경로만으로 최댓값을 다시 구해 관측 피크와 비교한다. 이 마스크는 사후 채점 규칙이며 발행 예측에 미래의 결측 여부를 넣는 것이 아니다. 발행하는 초과확률은 식~\eqref{eq:ch2-risk}의 보정 전 경로 확률이며, 짧은 보정 기간의 Platt 보정을 쓰지 않은 이유는 3.3절에서 설명한다.
+
+\hwpsection{2.2 비교모델 및 평가조건}
+
+C-BAT의 구성 요소별 효과와 범용 기계학습 대비 성능을 확인하기 위해 다섯 비교모델을 두었다(표~\ref{tab:ch2-models}).
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\setlength{\tabcolsep}{3pt}
+\caption{비교모델의 입력, 구조, 역할.}\label{tab:ch2-models}
+\begin{tabular}{L{2.3cm}L{4.4cm}L{5.3cm}L{3.4cm}}
+\toprule
+모델 & 입력 & 구조와 출력 & 역할 \\
+\midrule
+B0 & 7일 전 같은 슬롯의 전력. 그 슬롯이 결측이면 B0$'$ 기준일(28일 이내 가동 여부·날짜유형 일치 최근 완전 관측일)의 값 & 과거 곡선 복사. 점예측만 냄 & 생산계획을 쓰지 않는 최소 기준선 \\
+B0\_kind & 28일 이내에서 가동유형과 날짜유형이 같은 가장 최근 완전 관측일. 없으면 같은 가동유형, 그다음 가장 최근 완전 관측일 & 과거 곡선 복사. 점예측만 냄 & 가동유형 일치만으로 얻는 성능. 강한 단순 기준선 \\
+M2 & 슬롯 시각, 달력(요일·날짜유형·월·계절·공휴일)과 가동 여부, 1·2·7일 전 같은 슬롯 전력, 전일 전력 요약, 최근 7일 같은 조건 평균, 기본곡선 특징, 전일 기상·생산 요약, 당일 시간별 생산량·생산 여부 & LightGBM 기본 하이퍼파라미터, 100회 부스팅. 슬롯 평균(제곱오차)·19개 분위수 회귀, 일 피크 19개 분위수 회귀(당일 총생산량·생산시간 추가), $C_{50}$·$C_{75}$·$C_{90}$ 이진 분류 & 생산계획을 쓰는 범용 기계학습 비교모델 \\
+LightGBM(튜닝) & M2와 같음 & M2와 같은 출력. 검증 구간 내부의 조정일 7일로 슬롯 모형과 일 피크 모형의 후보 각 37개(잎 수, 최소 잎 자료 수, 학습률, 부스팅 횟수) 중 중앙값 절대오차가 가장 작은 것을 선택 & 튜닝 부족 여부 점검. 개발 구간에서만 실행 \\
+기존 BAT & C-BAT와 같음 & 같은 평균식. 라플라스 관측오차, 커널 형상 $(\sigma,\beta,\ell)$도 학습, 가동 상태를 나누지 않은 공통 잡음(날짜 효과·AR(1) 라플라스 혁신을 잔차에서 추정해 예측 경로에만 추가). 2,000회 표집, 앞 1,000회 제외 & 이전 판. C-BAT의 변경 효과 확인 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\hwpnote{M2와 LightGBM(튜닝)의 기본곡선 특징은 가동 여부·날짜유형별 가중 RW2 평균 곡선이며, 평활 강도와 반감기는 검증 구간 내부 조정일로 고른다. 두 모델의 점예측은 50\% 분위수 회귀, 일 피크는 일 피크 분위수 회귀의 중앙값이다.}
+
+모든 모델에 다음 평가조건을 같게 적용하였다.
+\begin{hwplist}
+\item 발행 시점과 정보 차단: 매일 00:00에 당일 96슬롯을 예측한다. 모든 모델의 예측 함수는 예측일과 그 이후의 전력을 지운 자료만 받는다.
+\item 검증 구간: 개발 구간 f1--f4와 9월 시험 구간이며, 각 구간의 모델과 피크 기준은 그 이전 자료만으로 학습한다(1.4절).
+\item 결측 마스크: 슬롯 지표는 관측 슬롯만으로, 일 피크 지표는 결측이 4슬롯 이하인 피크 평가일에서 관측 슬롯의 최댓값으로 계산한다. 모든 모델이 같은 날짜와 같은 관측 슬롯(개발 5,016개, 9월 1,342개)으로 채점된다.
+\item 시드: C-BAT는 개발 구간에서 시드 0--2로 세 번 적합해 시드별 지표를 평균하고, 9월에는 개발 구간에서 동결한 설정을 시드 0으로 한 번 적용하였다. 기존 BAT, M2, LightGBM(튜닝)은 시드 0의 단일 실행이다.
+\item 9월 재계산: 9월의 B0, M2, 기존 BAT는 동결한 설정으로 다시 계산해 저장된 슬롯 예측과 같음을 확인하였다. B0\_kind와 LightGBM(튜닝)은 9월 일별 예측이 없어 9월 단독 비교와 합산 평가에서 빠진다.
+\end{hwplist}
+
+지표의 정의는 다음과 같다. $N=\sum_d|\mathcal O_d|$은 평가 슬롯 수, $\hat y^{\mathrm{med}}_{d,t}$와 $\hat y^{\mathrm{mean}}_{d,t}$는 예측 중앙값과 평균, $\mathcal D_P$는 피크 평가일, $M^{\mathrm{obs}}_d=\max_{t\in\mathcal O_d}y_{d,t}$는 관측 피크이다. 확률 모델의 피크 예측 $\hat M^{\mathrm{med}}_d$와 $\hat M^{\mathrm{mean}}_d$는 관측 슬롯에서 구한 경로 최댓값의 중앙값과 평균이다.
+\begin{align}
+\mathrm{MAE} &= \frac1N\sum_{d}\sum_{t\in\mathcal O_d}\bigl|y_{d,t}-\hat y^{\mathrm{med}}_{d,t}\bigr|, &
+\mathrm{RMSE} &= \Bigl[\frac1N\sum_{d}\sum_{t\in\mathcal O_d}\bigl(y_{d,t}-\hat y^{\mathrm{mean}}_{d,t}\bigr)^2\Bigr]^{1/2}, \notag\\
+R^2 &= 1-\frac{\sum_{d,t}(y_{d,t}-\hat y^{\mathrm{mean}}_{d,t})^2}{\sum_{d,t}(y_{d,t}-\bar y)^2}, &
+\mathrm{WAPE} &= 100\times\frac{\sum_{d,t}\bigl|y_{d,t}-\hat y^{\mathrm{med}}_{d,t}\bigr|}{\sum_{d,t}|y_{d,t}|}, \label{eq:ch2-metrics}\\
+\mathrm{CRPS} &\approx \frac1N\sum_{d,t}\frac{2}{19}\sum_{j=1}^{19}\rho_{\tau_j}\bigl(y_{d,t}-Q_{\tau_j,d,t}\bigr), &
+\rho_\tau(v) &= v\{\tau-\mathbf 1[v<0]\},\quad \tau_j=0.05j, \notag\\
+\mathrm{MAE}_{\mathrm{peak}} &= \frac1{|\mathcal D_P|}\sum_{d\in\mathcal D_P}\bigl|M^{\mathrm{obs}}_d-\hat M^{\mathrm{med}}_d\bigr|, &
+\mathrm{Hit}_{\pm2} &= \frac1{|\mathcal D_P|}\sum_{d\in\mathcal D_P}\mathbf 1\bigl[|t^{*}_d-\hat t_d|\le2\bigr]. \notag
+\end{align}
+피크 RMSE와 피크 $R^2$는 $\hat M^{\mathrm{mean}}_d$로 같은 꼴로 계산한다. $Q_{\tau_j,d,t}$는 슬롯 분위수, $t^{*}_d$는 관측 피크가 처음 나온 슬롯, $\hat t_d$는 예측 피크 슬롯(C-BAT와 기존 BAT는 경로별 최댓값 슬롯의 최빈값, 나머지는 점예측 곡선의 최댓값 슬롯)이다. 구간 적중률은 관측값이 분위수 구간(50\%는 q25--q75, 80\%는 q10--q90, 90\%는 q05--q95) 안에 든 비율이고, 구간 폭은 상한과 하한 차이의 평균이다. 각 지표를 쓰는 이유는 다음과 같다.
+\begin{hwplist}
+\item 슬롯 MAE(주지표): 오차를 kW 단위 그대로 평균하므로 현장에서 바로 읽을 수 있고, 일부 큰 오차에 덜 휘둘린다. 절대오차의 기댓값을 가장 작게 하는 점예측은 예측분포의 중앙값이므로 중앙값으로 계산하였다.
+\item RMSE: 오차를 제곱해 큰 오차에 더 큰 벌점을 주므로, 피크 부근이나 가동 전환 시점처럼 크게 빗나간 슬롯을 드러낸다. 제곱오차를 가장 작게 하는 점예측은 평균이므로 예측 평균으로 계산하였다. MSE는 단위가 kW$^2$여서 크기를 직관적으로 읽기 어렵고 MAE와 나란히 비교할 수 없다. 제곱근을 취한 RMSE는 MSE와 모델 순위가 같으면서 kW 단위를 유지하므로 MSE 대신 RMSE를 보고하였다. RMSE가 MAE보다 크게 벌어지면 큰 오차가 많다는 뜻이다.
+\item $R^2$: 전력 변동 가운데 예측이 설명한 비율로, 단위 없이 비교할 수 있다. 다만 가동일과 비가동일의 수준 차이가 커서 대부분의 모델에서 높게 나오므로 보조 지표로만 썼다.
+\item WAPE: 전체 오차를 전체 전력으로 나눈 상대 오차이다. MAPE는 슬롯마다 실제값으로 나누므로 비가동 시간의 낮은 전력(비가동일 일 피크 중앙값 27 kW, 1.2절)에서 값이 크게 부풀어 평가가 저부하 슬롯에 좌우된다. WAPE는 분모가 평가 기간 전체 전력의 합이라 이런 왜곡이 없어 MAPE 대신 사용하였다.
+\item CRPS: 점예측이 아니라 예측분포 전체를 실제값과 비교하는 적절 점수(proper scoring rule)로, 분포의 위치와 폭을 함께 평가한다. 연속 적분 대신 19개 분위수의 pinball 손실 평균을 2배 한 근사를 썼으며, 분포를 내지 않는 B0·B0\_kind는 계산하지 않았다.
+\item 일 피크 MAE·RMSE·$R^2$: 기본요금은 요금 적용 시간대의 최대수요로 매겨지고 설비 부담도 하루 최댓값이 정하므로 슬롯 오차와 별도로 평가하였다. 슬롯 지표와 같은 이유로 MAE는 중앙값, RMSE와 $R^2$는 평균으로 계산하였다.
+\item 피크 시각 적중($\pm$2슬롯): 피크가 언제 오는지는 점검 시각을 정하는 데 필요하다. 15분 단위로 정확히 맞히기는 어려우므로 $\pm$30분까지 적중으로 보았다.
+\item 구간 적중률과 폭: 분위수 구간이 명목 수준을 맞추는지(보정)와 얼마나 좁은지(예리함)를 함께 본다. 구간이 지나치게 넓으면 적중률은 높아도 경보가 과다해진다.
+\end{hwplist}
+\hwpnote{피크 초과확률의 Brier 점수와 경보의 정밀도·재현율·F1은 3.3절에서 다룬다.}
+
+합산 평가는 개발 구간과 9월 시험 구간의 날짜를 한데 모아 계산한다. 평가일 집합을 $\mathcal D$($|\mathcal D|=67$, $\sum_d|\mathcal O_d|=6{,}358$), 시드 집합을 $\mathcal R_d$(개발 구간 $\{0,1,2\}$, 9월 $\{0\}$), 시드 $r$의 슬롯 중앙값과 피크 중앙값을 $\hat y^{(r)}_{m,d,t}$, $\hat M^{(r)}_{m,d}$라 하면 모델 $m$의 합산 지표는 다음과 같다($|\mathcal D_P|=65$).
+\begin{equation}
+\begin{split}
+\mathrm{MAE}_{\mathrm{slot}}(m) &= \frac{\sum_{d\in\mathcal D}\frac1{|\mathcal R_d|}\sum_{r\in\mathcal R_d}\sum_{t\in\mathcal O_d}\bigl|y_{d,t}-\hat y^{(r)}_{m,d,t}\bigr|}{\sum_{d\in\mathcal D}|\mathcal O_d|},\\
+\mathrm{MAE}_{\mathrm{peak}}(m) &= \frac1{|\mathcal D_P|}\sum_{d\in\mathcal D_P}\Bigl|\frac1{|\mathcal R_d|}\sum_{r\in\mathcal R_d}\hat M^{(r)}_{m,d}-M^{\mathrm{obs}}_d\Bigr|.
+\end{split}
+\label{eq:ch2-pooled}
+\end{equation}
+슬롯 MAE는 관측 슬롯 수로 가중하고 피크 MAE는 피크 평가일을 같은 무게로 세므로, 개발 구간과 9월의 MAE를 단순히 절반씩 평균하지 않는다. 시드 반복은 평가일 수를 늘리지 않는다.
+
+모델 간 차이의 불확실성은 짝지은 부트스트랩으로 평가하였다. 차이는 $\Delta_{m}=L(\text{C-BAT})-L(m)$이며 음수가 C-BAT에 유리하다. 평가일을 복원추출로 4,000회 재표집하고(난수 시드 0), 슬롯 지표는 재표집마다 절대오차 합과 관측 슬롯 수를 함께 합해 비율을 구하며, 피크 지표는 날짜별 손실 차이를 평균한다. 95\% 구간은 재표집 차이의 2.5·97.5\% 분위수이다. 개발 구간에서는 시드별 날짜 손실을 먼저 평균한 뒤 재표집하고, 날짜 사이의 상관을 고려해 56일 달력(목표가 없는 날은 0으로 채움)에서 길이 7일의 이동 블록을 뽑는 7일 블록 구간을 함께 계산하였다.
+
+\hwpsection{2.3 모델별 성능 비교와 최종모델 선정}
+
+합산 평가에서 C-BAT의 일 피크 MAE는 8.93 kW로 네 모델 가운데 가장 낮았다(표~\ref{tab:ch2-pooled}). 기존 BAT(13.09 kW)보다 31.8\%, M2(14.54 kW)보다 38.6\% 작다. 슬롯 MAE는 8.22 kW로 M2(10.57 kW)보다 작지만 기존 BAT(7.61 kW)보다 크다. C-BAT의 피크 MAE는 개발 구간 8.927 kW, 9월 8.934 kW로 두 기간에서 가까웠다. 다만 두 기간의 평균 오차가 비슷하다는 사실이 날짜별 안정성이나 다른 계절에서의 성능을 보장하지는 않는다.
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\caption{합산 평가 결과(개발 구간 f1--f4와 9월 시험 구간, kW). 각 열에서 가장 낮은 값을 굵게 표시하였다. 합산 비교는 9월 일별 예측이 있는 네 모델에 한정한다.}\label{tab:ch2-pooled}
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{3}{c}{슬롯 MAE} & \multicolumn{3}{c}{일 피크 MAE} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+모델 & 개발(53일) & 9월(14일) & 합산(67일) & 개발(51일) & 9월(14일) & 합산(65일) \\
+\midrule
+C-BAT & 8.50 & 7.18 & 8.22 & \textbf{8.93} & 8.93 & \textbf{8.93} \\
+기존 BAT & \textbf{7.82} & 6.82 & \textbf{7.61} & 14.50 & 7.98 & 13.09 \\
+M2 & 11.64 & \textbf{6.60} & 10.57 & 17.02 & \textbf{5.53} & 14.54 \\
+B0 & 26.84 & 7.88 & 22.84 & 42.22 & 7.00 & 34.63 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+짝지은 부트스트랩에서 합산 피크 MAE의 차이는 기존 BAT 대비 $-4.17$ kW, M2 대비 $-5.61$ kW이고 두 95\% 구간 모두 0을 포함하지 않는다(표~\ref{tab:ch2-boot}). 반면 합산 슬롯 MAE는 기존 BAT보다 0.61 kW 높고 구간 $[0.07,\ 1.18]$도 0을 포함하지 않아, 슬롯 곡선에서는 기존 BAT가 더 정확하다. 합산 구간은 날짜 간 상관을 보정하지 않았으므로 개발 구간에서는 7일 블록 구간을 함께 보았다. 기존 BAT 대비 전체·고피크일 피크 MAE 개선과 LightGBM(튜닝) 대비 고피크일 피크 MAE 개선은 두 구간 모두에서 0을 포함하지 않았다. LightGBM(튜닝) 대비 슬롯 MAE와 CRPS 개선은 날짜 단위 구간에서만 0을 벗어났고, 기존 BAT 대비 CRPS 차이($-0.03$ kW)는 두 구간 모두에서 0을 포함하였다. B0\_kind 대비 전체 피크 MAE는 C-BAT가 2.26 kW 높고(날짜 단위 구간 $[0.36,\ 4.12]$), 고피크일 피크 MAE는 3.17 kW 낮으나 날짜 단위 구간 $[-7.04,\ 0.40]$은 0을 조금 포함하고 7일 블록 구간 $[-7.84,\ -0.10]$은 포함하지 않는다.
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\setlength{\tabcolsep}{4pt}
+\caption{짝지은 부트스트랩 차이(C-BAT $-$ 비교모델, kW). 음수가 C-BAT에 유리하다. 고피크일은 개발 구간 13일이다.}\label{tab:ch2-boot}
+\begin{tabular}{lllrrll}
+\toprule
+평가 & 비교모델 & 지표 & 날짜 수 & 차이 & 날짜 단위 95\% 구간 & 7일 블록 95\% 구간 \\
+\midrule
+합산 & 기존 BAT & 슬롯 MAE & 67 & $+0.61$ & $[0.07,\ 1.18]$ & -- \\
+ & & 피크 MAE & 65 & $-4.17$ & $[-6.95,\ -1.31]$ & -- \\
+ & M2 & 슬롯 MAE & 67 & $-2.35$ & $[-4.47,\ -0.42]$ & -- \\
+ & & 피크 MAE & 65 & $-5.61$ & $[-10.24,\ -1.38]$ & -- \\
+\midrule
+개발 & 기존 BAT & 슬롯 MAE & 53 & $+0.68$ & $[-0.01,\ 1.36]$ & $[0.34,\ 1.22]$ \\
+ & & 슬롯 CRPS & 53 & $-0.03$ & $[-0.66,\ 0.57]$ & $[-0.81,\ 0.61]$ \\
+ & & 피크 MAE & 51 & $-5.57$ & $[-8.76,\ -2.07]$ & $[-12.16,\ -0.99]$ \\
+ & & 고피크일 피크 MAE & 13 & $-8.10$ & $[-11.19,\ -5.80]$ & $[-9.99,\ -5.72]$ \\
+ & B0\_kind & 슬롯 MAE & 53 & $-0.01$ & $[-1.27,\ 1.08]$ & $[-1.17,\ 1.21]$ \\
+ & & 피크 MAE & 51 & $+2.26$ & $[0.36,\ 4.12]$ & $[-0.29,\ 4.16]$ \\
+ & & 고피크일 피크 MAE & 13 & $-3.17$ & $[-7.04,\ 0.40]$ & $[-7.84,\ -0.10]$ \\
+ & LightGBM(튜닝) & 슬롯 MAE & 53 & $-2.55$ & $[-5.08,\ -0.33]$ & $[-7.30,\ 0.63]$ \\
+ & & 슬롯 CRPS & 53 & $-1.69$ & $[-3.48,\ -0.12]$ & $[-5.10,\ 0.68]$ \\
+ & & 피크 MAE & 51 & $-1.14$ & $[-3.79,\ 1.48]$ & $[-5.58,\ 2.03]$ \\
+ & & 고피크일 피크 MAE & 13 & $-13.90$ & $[-19.01,\ -9.86]$ & $[-18.59,\ -11.63]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+개발 구간에서는 여섯 모델을 모든 지표로 비교하였다(표~\ref{tab:ch2-dev}, 그림~\ref{fig:ch2-compare}). C-BAT의 슬롯 RMSE는 12.37 kW, $R^2$는 0.960, CRPS는 6.96 kW로 비교모델 가운데 가장 좋았다. 슬롯 MAE는 기존 BAT가 7.82 kW로 가장 낮고 C-BAT(8.50 kW)와 B0\_kind(8.51 kW)가 비슷하였다. C-BAT는 중앙값 기준 MAE에서는 기존 BAT에 뒤지고 평균 기준 RMSE에서는 앞서, 크게 빗나가는 슬롯이 상대적으로 적은 것으로 해석된다. 생산계획을 넣은 LightGBM은 튜닝 뒤에도 슬롯 MAE 11.05 kW, CRPS 8.65 kW로 C-BAT보다 컸다. 같은 복사 방식이라도 B0는 26.84 kW, 가동유형을 맞춘 B0\_kind는 8.51 kW로, 기준일을 고를 때 가동유형 일치가 결정적이다.
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\setlength{\tabcolsep}{4pt}
+\caption{개발 구간 f1--f4 성능(53일, 5,016슬롯, 피크 평가일 51일). 단위는 kW(WAPE는 \%, $R^2$와 시각 적중은 비율). M2 행은 WAPE·$R^2$·피크 RMSE·피크 $R^2$가 저장되어 있지 않아 비워 두었다.}\label{tab:ch2-dev}
+\begin{tabular}{lrrrrrrrrr}
+\toprule
+ & \multicolumn{5}{c}{슬롯} & \multicolumn{4}{c}{일 피크} \\
+\cmidrule(lr){2-6}\cmidrule(lr){7-10}
+모델 & MAE & RMSE & $R^2$ & WAPE & CRPS & MAE & RMSE & $R^2$ & 시각 적중 \\
+\midrule
+B0 & 26.84 & 52.62 & 0.280 & 29.65 & -- & 42.22 & 79.37 & $-0.058$ & 0.098 \\
+B0\_kind & 8.51 & 14.98 & 0.942 & 9.40 & -- & \textbf{6.67} & \textbf{10.03} & \textbf{0.983} & 0.157 \\
+M2 & 11.64 & 21.46 & -- & -- & 8.96 & 17.02 & -- & -- & 0.157 \\
+LightGBM(튜닝) & 11.05 & 19.78 & 0.898 & 12.20 & 8.65 & 10.06 & 17.94 & 0.946 & 0.118 \\
+기존 BAT & \textbf{7.82} & 12.61 & 0.959 & \textbf{8.64} & 6.99 & 14.50 & 16.97 & 0.952 & \textbf{0.255} \\
+C-BAT & 8.50 & \textbf{12.37} & \textbf{0.960} & 9.39 & \textbf{6.96} & 8.93 & 12.06 & 0.976 & 0.203 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{model_compare.pdf}
+\caption{개발 구간 f1--f4의 슬롯 RMSE, CRPS, 일 피크 MAE(kW). 점 위의 숫자는 표~\ref{tab:ch2-dev}의 값이며 LightGBM은 LightGBM(튜닝)이다. B0\_kind는 분포를 내지 않아 CRPS가 없다.}\label{fig:ch2-compare}
+\end{figure}
+
+C-BAT의 가장 큰 개선은 일 피크에서 나왔다. 기존 BAT의 피크 MAE 14.50 kW를 8.93 kW로 줄였고 피크 $R^2$는 0.952에서 0.976으로 올랐다. 전체 피크 MAE만 보면 B0\_kind(6.67 kW)가 가장 낮지만, 관측 피크가 학습 기간 $C_{90}$을 넘은 고피크일 13일의 피크 MAE는 C-BAT 4.37 kW, B0\_kind 7.54 kW, 기존 BAT 12.47 kW, LightGBM(튜닝) 18.27 kW로 C-BAT가 가장 낮았다. B0\_kind는 최근의 같은 유형 날을 복사하므로 평범한 날에는 잘 맞지만 과거보다 높게 오르는 날은 따라가지 못한다. 기존 BAT는 비가동일 14일의 피크를 평균 24.59 kW 높게 보았고, 같은 날들에서 C-BAT의 편향은 2.54 kW였다. 대신 C-BAT는 가동일 37일의 피크를 평균 9.74 kW 높게 예측한다(편향은 예측 평균 $-$ 관측). 이 과대예측의 원인은 3.2절에서 분석한다. 피크 시각 적중률은 기존 BAT 0.255, C-BAT 0.203으로 모든 모델이 낮다. 구간은 넓은 쪽으로 치우쳤다. C-BAT 슬롯 90\% 구간의 적중률은 0.990(평균 폭 58.97 kW), 50\% 구간은 0.781(24.58 kW)로 명목값보다 높고, 일 피크 90\% 구간 적중률은 0.948로 명목값에 더 가깝다.
+
+그림~\ref{fig:ch2-examples}은 비가동일, 고피크가 아닌 가동일, 고피크일에서 일 슬롯 MAE가 각 층의 중앙값에 가장 가까운 대표일의 예측이다. 비가동일(8월 5일)에는 C-BAT 중앙값이 관측과 거의 겹쳤고(일 슬롯 MAE 1.76 kW) LightGBM(튜닝)은 08--20시에 관측보다 뚜렷이 높았다. 가동일(7월 16일)에는 C-BAT가 12시와 17시 무렵의 부하 하락을 포함한 하루 모양을 따랐고, 08--12시의 관측은 중앙값보다 높았으나 90\% 구간 안에 있었다. 고피크일(7월 21일)에는 세 모델의 중앙값 곡선이 모두 08--10시와 13--15시의 관측 피크보다 낮았다. 관측 피크는 C-BAT 90\% 구간의 위쪽에 들어왔다. 중앙값 곡선의 최댓값이 아니라 경로 최댓값의 분포로 일 피크를 예측하는 이유가 여기에 있다.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.86\linewidth]{forecast_examples.pdf}
+\caption{층별 대표일의 C-BAT 예측(시드 0). 위부터 비가동일(Nonop, 8월 5일), 고피크가 아닌 가동일(Op, 7월 16일), 고피크일(High peak, 7월 21일)이며 제목의 MAE는 그날 C-BAT의 슬롯 MAE(kW)이다. 검은 선은 관측(Observed), 파란 실선은 C-BAT 중앙값, 짙은·옅은 띠는 C-BAT 50\%·90\% 구간, 회색 파선은 기존 BAT(BAT), 보라색 일점쇄선은 LightGBM(튜닝)의 중앙값이다. 가로축은 시각(Hour)이다.}\label{fig:ch2-examples}
+\end{figure}
+
+9월 시험 구간 단독에서는 M2가 C-BAT보다 좋았다(표~\ref{tab:ch2-sept}). M2의 슬롯 MAE는 6.60 kW, CRPS 5.03 kW, 피크 MAE 5.53 kW로 C-BAT(7.18 kW, 5.71 kW, 8.93 kW)보다 낮았다. 슬롯 MAE 차이(C-BAT $-$ M2)는 $+0.58$ kW이고 날짜 단위 부트스트랩 95\% 구간 $[-0.24,\ 1.43]$이 0을 포함해 14일로는 유의하지 않다. 9월에는 고피크일이 하루도 없고 비가동일도 2일뿐이어서 C-BAT의 강점인 고피크일 성능을 시험할 기회가 없었다. C-BAT의 90\% 구간 적중률은 0.984로 개발 구간처럼 구간이 넓었다. 9월은 이전 개발 단계에서 한 번 열린 적이 있어 완전히 독립된 시험이 아니다.
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\caption{9월 시험 구간 단독 성능(2021년 9월 1--14일, 1,342슬롯, 피크 평가일 14일, kW).}\label{tab:ch2-sept}
+\begin{tabular}{lrrrrrrr}
+\toprule
+모델 & 슬롯 MAE & RMSE & $R^2$ & CRPS & 90\% 구간 적중 & 피크 MAE & 시각 적중 \\
+\midrule
+B0 & 7.88 & 11.18 & 0.962 & -- & -- & 7.00 & 0.143 \\
+M2 & \textbf{6.60} & 9.75 & 0.971 & \textbf{5.03} & 0.872 & \textbf{5.53} & 0.286 \\
+기존 BAT & 6.82 & \textbf{9.53} & \textbf{0.972} & 5.51 & 0.948 & 7.98 & 0.286 \\
+C-BAT & 7.18 & 9.79 & 0.971 & 5.71 & 0.984 & 8.93 & 0.286 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+절제 비교는 C-BAT의 설계 선택을 개발 구간에서 확인한다(표~\ref{tab:ch2-ablation}). 공통 잡음 비교는 학습형 커널 모델에서만 실행했으므로 학습형 커널 행과 비교한다. 잡음을 상태별에서 공통으로 바꾸면 피크 MAE가 9.16 kW에서 15.29 kW로, 고피크일 피크 MAE가 4.38 kW에서 7.80 kW로 커졌다. 다만 두 비교 모형의 최대 split-$\hat R$이 1.308과 2.303으로 기준을 넘으므로 이 차이를 잡음 설계만의 확정된 효과 크기로 보지 않는다. 커널을 학습형으로 바꾸면 슬롯 MAE는 0.17 kW 좋아지고(날짜 단위 구간 $[0.07,\ 0.28]$) 피크 MAE는 0.23 kW 나빠지며 수렴 기준도 넘었다. 이에 따라 수렴이 안정적이고 피크가 조금 나은 고정 커널을 택하였다. 가동유형 기준 기준일(종류 기준)은 슬롯 MAE를 7.80 kW로 낮추지만 피크 MAE(9.06 kW)와 고피크일 피크 MAE(5.02 kW)가 커져 채택하지 않았다. 기존 BAT에서 생산 전달항을 빼도 슬롯 MAE 7.73 kW, 피크 MAE 14.53 kW로 기존 BAT와 거의 같았다. 이 밖에 사전 등록한 확장 실험 11가지는 모두 채택 조건을 넘지 못하였으며 3.4절에 정리하였다.
+
+\begin{table}[htbp]
+\centering
+\hwptablefont
+\caption{절제 비교(개발 구간 f1--f4, 시드 0--2 평균, kW). C-BAT는 상태별 잡음과 고정 커널을 쓴다. 공통 잡음 행은 학습형 커널 행과 비교한다. 기존 BAT 두 행은 split-$\hat R$ 기록이 없다.}\label{tab:ch2-ablation}
+\begin{tabular}{lrrrrrr}
+\toprule
+모델 & 슬롯 MAE & RMSE & CRPS & 피크 MAE & 고피크일 피크 MAE & 최대 $\hat R$ \\
+\midrule
+C-BAT & 8.50 & 12.37 & 6.96 & \textbf{8.93} & \textbf{4.37} & 1.029 \\
+학습형 커널 & 8.34 & \textbf{12.10} & \textbf{6.85} & 9.16 & 4.38 & 1.308 \\
+공통 잡음(학습형 커널) & 8.26 & 12.15 & 7.43 & 15.29 & 7.80 & 2.303 \\
+종류 기준 기준일 & 7.80 & 12.80 & 6.86 & 9.06 & 5.02 & 1.038 \\
+기존 BAT & 7.82 & 12.61 & 6.99 & 14.50 & 12.47 & -- \\
+기존 BAT(전달항 없음) & \textbf{7.73} & 12.89 & 7.03 & 14.53 & 12.27 & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+최종모델은 개발 구간 결과로 C-BAT를 선정하였고, 동결한 C-BAT의 성능을 9월까지 합친 합산 평가로 보고한다. 선정 근거는 다음과 같다.
+\begin{hwplist}
+\item 일 피크: 합산 피크 MAE가 8.93 kW로 네 모델 중 가장 낮고, 기존 BAT·M2 대비 차이의 구간이 0을 포함하지 않는다.
+\item 고피크일: 요금과 설비 운용에 가장 중요한 고피크일 13일의 피크 MAE가 4.37 kW로 개발 구간 여섯 모델 중 가장 낮고, 기존 BAT·LightGBM(튜닝) 대비 개선은 두 방식의 구간 모두에서 0을 포함하지 않는다.
+\item 확률 예측: 개발 구간 슬롯 RMSE(12.37 kW)와 CRPS(6.96 kW)가 가장 낮다. 일 피크 분포와 초과확률을 같은 경로에서 내며, 점예측만 내는 B0\_kind는 이 산출물(4장 월 최대 갱신 경보의 입력)을 줄 수 없다.
+\item 안정성과 단순성: 모든 적합 단계에서 split-$\hat R$이 1.05 이하로 수렴 기준을 만족하였다. 입력은 생산계획, 가동 여부·날짜유형, 과거 전력뿐이며 기상과 공휴일 정보는 쓰지 않는다.
+\end{hwplist}
+다음 약점과 한계도 함께 밝힌다.
+\begin{hwplist}
+\item 합산 슬롯 MAE는 기존 BAT(7.61 kW)가 C-BAT(8.22 kW)보다 낮다. 슬롯 곡선만 보면 C-BAT가 최선이 아니다.
+\item 개발 구간 전체 피크 MAE는 B0\_kind(6.67 kW)가 C-BAT(8.93 kW)보다 낮고, C-BAT는 가동일 37일의 피크를 평균 9.74 kW 높게 예측한다.
+\item 9월 단독에서는 M2가 슬롯 MAE, CRPS, 피크 MAE에서 C-BAT보다 좋았다.
+\item 9월 시험 구간은 이전 개발 단계에서 한 번 열린 적이 있어 완전한 미사용 구간이 아니며, 9월에는 고피크일이 0일이어서 고피크일 성능은 개발 구간 13일에서만 확인되었다.
+\item 합산 비교는 9월 일별 예측이 있는 네 모델(C-BAT, 기존 BAT, M2, B0)에 한정되며, B0\_kind와 LightGBM(튜닝)에 대한 우위로 확대하지 않는다.
+\item 월 최대 갱신 경보의 백테스트에서 갱신일은 1건(7월 19일)뿐이고, 그 133,120원은 완벽한 조치를 가정한 상한이다(4장).
+\item 생산계획을 옮겨 얻는다는 모형 반사실 절감액은 관측 유사일 검증에서 지지되지 않아 주장하지 않는다(4장).
+\end{hwplist}
+따라서 합산 평가의 피크 개선은 성과로 보고하되, 모든 모델과 계절에 대한 우위나 실제 조치 효과로 확대하지 않는다.
