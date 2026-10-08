@@ -57,13 +57,14 @@ def _job(fold: str, i: int, n_iter: int, rounds: int, final: bool) -> tuple[pl.D
     return slots, days, inner
 
 
-def _final_outputs(out: Path, slots: pl.DataFrame, days: pl.DataFrame) -> None:
-    bat_slots = slots.filter(pl.col("model") == "BAT").sort("datetime")
-    bat_days = days.filter(pl.col("model") == "BAT").select(
+def _final_outputs(out: Path, slots: pl.DataFrame, days: pl.DataFrame, risk: str = "platt", model: str = "BAT") -> None:
+    """Write `model`'s test_predictions.csv/eval_mask.csv; risk = "platt" (calibrated) or "raw" (path exceedance)."""
+    bat_slots = slots.filter(pl.col("model") == model).sort("datetime")
+    bat_days = days.filter(pl.col("model") == model).select(
         "date", "M_hat_median", "M_hat_mean",
         pl.format("{}:{}", (pl.col("peak_time_mode") // 4).cast(pl.String).str.zfill(2),
                   (pl.col("peak_time_mode") % 4 * 15).cast(pl.String).str.zfill(2)).alias("peak_time_mode"),
-        *(pl.col(f"risk_platt_{c}").alias(f"risk_{c}") for c in ev.CS), *ev.CS)
+        *(pl.col(f"risk_{risk}_{c}").alias(f"risk_{c}") for c in ev.CS), *ev.CS)
     preds = bat_slots.join(bat_days, on="date", validate="m:1").select(
         "datetime", "model", "y_mean", "y_median", *ev.QCOLS, "M_hat_median", "M_hat_mean", "peak_time_mode",
         *(f"risk_{c}" for c in ev.CS), *ev.CS)

@@ -13,7 +13,7 @@ from gmst.run_v3 import SUMMARY
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Recompute development metrics from saved OOF predictions.")
-    parser.add_argument("--source", type=Path, default=ROOT / "results_v3/conditional_fixed")
+    parser.add_argument("--source", type=Path, default=ROOT / "results_v3/attention_ablation")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     if args.out is None:
@@ -34,8 +34,7 @@ def main() -> None:
         assert set(slots["fold"]) == set(days["fold"]) == set(ev.FOLDS_CV)
         verify_alignment(slots, days, reference_slots, reference_days)
         if path != paths[0]:
-            predicate = pl.col("model").is_in(["BAT_conditional_gaussian", "BAT_pooled_gaussian",
-                                               "BAT_conditional_gaussian_fixed_attention"])
+            predicate = pl.col("model").str.contains("^BAT_(conditional|pooled)_gaussian")
             slots, days = slots.filter(predicate), days.filter(predicate)
         metrics = ev.point_metrics(slots, days, panel)
         high = ev.point_metrics(slots.head(0), days.filter(pl.col("M_true") > pl.col("C90")), panel)

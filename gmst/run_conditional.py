@@ -5,9 +5,10 @@ import json
 import multiprocessing as mp
 import os
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from time import perf_counter
+from typing import Final
 
 import numpy as np
 import polars as pl
@@ -27,7 +28,10 @@ from gmst.conditional_diagnostics import (
 )
 from gmst.contracts import Panel
 from gmst.preprocess import RAW
-from gmst.run_v3 import SUMMARY, _asof
+from gmst.run_v3 import SUMMARY, _asof, _final_outputs, _panel
+
+# (noise_state, innovation); the first is the default C-BAT control
+NOISE_VARIANTS = (("op", "gaussian"), ("kind", "gaussian"), ("slot", "gaussian"), ("op", "t"), ("kind", "t"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +181,63 @@ def collect(jobs: list[Job], source: Path) -> pl.DataFrame:
     return combined
 
 
+def source_hashes(files: list[Path]) -> dict[str, str]:
+    return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
+
+
+def run_final(out: Path, config: ConditionalConfig) -> pl.DataFrame:
+    """Open the sealed test fold once: fit on the test fold's training days (< 2021-09-01), score 09-01..14."""
+    model = _asof(conditional_model(config))
+    out.mkdir(parents=True, exist_ok=True)
+    files = [*sorted((ROOT / "gmst").glob("*.py")), ROOT / "uv.lock", RAW]
+    hashes = source_hashes(files)
+    status = {"status": "running", "fold": "test", "model": model["name"], "config": asdict(config),
+              "issued_risk": "raw path exceedance (no Platt)",
+              "september_opened": True, "exploratory": False, "source_sha256": hashes}
+    status_path = out / "run_status.json"
+    status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + "\n")
+    panel = _panel(final=True)  # DC10: the only sanctioned unseal path
+    slots, days, states, inner = ev.rolling_origin(model, panel, ("test",))
+    days, inner = ev.calibrate_oof(days, "platt", inner)
+    metrics = ev.point_metrics(slots, days, panel)
+    summary = (metrics.filter((pl.col("stratum") == "all") & pl.col("metric").is_in(SUMMARY))
+               .pivot(on="metric", index=["model", "fold"], values="value"))
+    for name, frame in (("test_slots", slots), ("test_days", days), ("inner_days", inner),
+                        ("test_metrics_long", metrics), ("test_metrics", summary)):
+        if frame is not None:
+            frame.write_csv(out / f"{name}.csv")
+    # 제출 파일: run_v3처럼 M̂/위험은 관측 슬롯으로 자르지 않은 발행값을 쓴다 (평가 지표는 위의 잘린 값)
+    issued = [model["predict"](states["test"], panel, int(d)) for d in sorted(features.role_idx(panel, "test", "test"))]
+    issued_days, _ = ev.calibrate_oof(days.with_columns(
+        M_hat_median=pl.Series([p["M_hat_median"] for p in issued]),
+        M_hat_mean=pl.Series([p["M_hat_mean"] for p in issued]),
+        peak_time_mode=pl.Series([p["peak_time_mode"] for p in issued]),
+        **{f"risk_raw_{c}": pl.Series([float(p["risk_raw"][j]) for p in issued]) for j, c in enumerate(ev.CS)}),
+        "platt", inner)
+    # 7일 내부 Platt는 9월 C90을 상수로 만든다 → 경로 위험 그대로 발행 (document/RISK_issuance_preregistration.md)
+    _final_outputs(out, slots, issued_days, risk="raw", model=model["name"])
+    posterior_tables(states["test"], out)
+    assert hashes == source_hashes(files), "Sources changed during run"
+    status_path.write_text(json.dumps({**status, "status": "complete"}, ensure_ascii=False, indent=2) + "\n")
+    return summary
+
+
+# flag → (results folder, config overrides per compared model, help); {} is the default C-BAT
+COMPARISONS: Final[dict[str, tuple[str, tuple[dict, ...], str]]] = {
+    "attention_ablation": ("attention_ablation", ({"fixed_attention": False}, {}),
+                           "Compare learned vs prior-fixed attention with conditional noise in both models"),
+    "pooled_noise_comparison": ("conditional", ({"conditional": False, "fixed_attention": False}, {"fixed_attention": False}),
+                                "Reproduce the earlier pooled/conditional comparison with learned attention"),
+    "ref_comparison": ("ref_ablation", ({}, {"ref": "kind"}), "Compare op vs operating-kind reference days"),
+    "noise_comparison": ("noise_ablation", tuple({"noise_state": n, "innovation": i} for n, i in NOISE_VARIANTS),
+                         "Default C-BAT with noise_state kind/slot and Student-t innovation variants"),
+}
+
+
+def configs(comparison: str | None, base: ConditionalConfig) -> list[ConditionalConfig]:
+    return [replace(base, **overrides) for overrides in (COMPARISONS[comparison][1] if comparison else ({},))]
+
+
 def main() -> None:
     for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "POLARS_MAX_THREADS"):
         os.environ[name] = "1"
@@ -189,33 +250,32 @@ def main() -> None:
     parser.add_argument("--burn", type=int)
     parser.add_argument("--workers", type=int, default=8)
     comparison = parser.add_mutually_exclusive_group()
-    comparison.add_argument("--attention-ablation", action="store_true",
-                            help="Compare learned vs prior-fixed attention with conditional noise in both models")
-    comparison.add_argument("--pooled-noise-comparison", action="store_true",
-                            help="Reproduce the earlier pooled/conditional comparison with learned attention")
+    for name, (_, _, text) in COMPARISONS.items():
+        comparison.add_argument("--" + name.replace("_", "-"), dest="comparison", action="store_const", const=name, help=text)
+    comparison.add_argument("--final", action="store_true",
+                            help="Open the sealed test fold (2021-09-01..14) once with the default C-BAT (first seed)")
     args = parser.parse_args()
-    if args.out is None:
-        folder = "attention_ablation" if args.attention_ablation else (
-            "conditional" if args.pooled_noise_comparison else "conditional_fixed")
-        args.out = ROOT / "results_v3" / folder
     burn = args.n_iter // 2 if args.burn is None else args.burn
     if args.workers < 1 or not 0 <= burn < args.n_iter or min(args.seeds) < 0:
         parser.error("require workers >= 1, 0 <= burn < n-iter and seeds >= 0")
+    if args.out is None:
+        folder = "cbat_final" if args.final else COMPARISONS[args.comparison][0] if args.comparison else "conditional_fixed"
+        args.out = ROOT / "results_v3" / folder
+    if args.final:
+        print(run_final(args.out, ConditionalConfig(n_iter=args.n_iter, burn=burn, seed=args.seeds[0])))
+        return
     folds, seeds = tuple(dict.fromkeys(args.folds)), tuple(dict.fromkeys(args.seeds))
-    variants = ((True, False), (True, True)) if args.attention_ablation else (
-        ((False, False), (True, False)) if args.pooled_noise_comparison else ((True, True),))
-    jobs = [Job(fold, ConditionalConfig(n_iter=args.n_iter, burn=burn, seed=seed,
-                conditional=conditional, fixed_attention=fixed), args.out)
-            for seed in seeds for fold in folds for conditional, fixed in variants]
+    jobs = [Job(fold, config, args.out) for seed in seeds for fold in folds
+            for config in configs(args.comparison, ConditionalConfig(n_iter=args.n_iter, burn=burn, seed=seed))]
     args.out.mkdir(parents=True, exist_ok=True)
     files = [*sorted((ROOT / "gmst").glob("*.py")), ROOT / "uv.lock", RAW,
              *(args.source / f"{name}.csv" for name in ("oof_slots", "oof_days", "inner_days"))]
-    hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
+    hashes = source_hashes(files)
     status = {"status": "running", "folds": folds, "seeds": seeds, "n_iter": args.n_iter, "burn": burn,
               "models": sorted({conditional_model(job.config)["name"] for job in jobs}),
-              "half_life": jobs[0].config.half_life,
-              "attention_ablation": args.attention_ablation,
-              "pooled_noise_comparison": args.pooled_noise_comparison,
+              "half_life": jobs[0].config.half_life, "comparison": args.comparison,
+              "configs": {conditional_model(job.config)["name"]: {k: v for k, v in asdict(job.config).items() if k != "seed"}
+                          for job in jobs},
               "fixed_shape": {"width": 1.5, "shape": 2.0, "lag_hours": 0.0},
               "workers": min(args.workers, 8, len(jobs)),
               "september_opened": False, "exploratory": True,
@@ -227,7 +287,7 @@ def main() -> None:
         list(pool.map(run_job, jobs))
     summary = collect(jobs, args.source)
     convergence = convergence_report(args.out, folds, seeds, status["models"])
-    assert hashes == {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}, "Sources changed during run"
+    assert hashes == source_hashes(files), "Sources changed during run"
     status_path.write_text(json.dumps({**status, "status": "complete", "alignment_verified": True,
                                       "basic_split_rhat_passed": bool(convergence["passed"].all())},
                                       ensure_ascii=False, indent=2) + "\n")

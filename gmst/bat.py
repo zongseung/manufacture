@@ -11,7 +11,6 @@ from collections.abc import Callable
 from typing import Final, NotRequired, TypedDict
 
 import numpy as np
-import torch
 
 from gmst.baselines import b0p_ref
 from gmst.contracts import FloatArray, IntArray, Model, Panel, Prediction
@@ -35,6 +34,7 @@ class BATMeanState(TypedDict):
     gam: FloatArray  # (S, 4)
     w: FloatArray  # (S, 2, 4) channels on/log × kind
     theta: FloatArray  # (S, 4, 5)
+    ref_rule: NotRequired[str]  # "op" (B0′, default) or "kind" (B0_kind reference day)
 
 
 class BATState(BATMeanState):
@@ -94,11 +94,19 @@ def channels(q_raw: FloatArray, q_scale: float) -> FloatArray:
     return np.stack([(q > 0).astype(float), np.log1p(q) / np.log1p(q_scale)])
 
 
-def _ref(panel: Panel, days: IntArray, kind: IntArray, kind_mean: FloatArray, scale: float) -> FloatArray:
-    """Most recent complete same op/daytype day (B0′ reference), else the kind's training mean."""
+
+
+def _ref(panel: Panel, days: IntArray, kind: IntArray, kind_mean: FloatArray, scale: float,
+         rule: str = "op") -> FloatArray:
+    """Most recent complete past reference day (B0′ op/daytype or B0_kind rule), else the kind's training mean."""
+    from gmst.benchmark_models import (
+        b0_kind_ref,  # benchmark_models imports this module
+    )
+
+    find = b0_kind_ref if rule == "kind" else b0p_ref
     out = np.empty((len(days), 96))
     for i, d in enumerate(days):
-        ref, _ = b0p_ref(panel, int(d))
+        ref, _ = find(panel, int(d))
         out[i] = panel["Y"][ref] / scale if ref is not None else kind_mean[kind[i]]
     return out
 
@@ -109,7 +117,7 @@ def _rw2(n: int = 96) -> FloatArray:
 
 
 def fit_bat(panel: Panel, train_idx: IntArray, C: FloatArray, n_iter: int = 2000, burn: int = 1000,
-            thin: int = 1, seed: int = 0, half_life: float | None = 30.0) -> BATState:
+            thin: int = 1, seed: int = 0, half_life: float | None = 30.0, use_transfer: bool = True) -> BATState:
     Y = panel["Y"]
     days = train_idx[np.isfinite(Y[train_idx]).any(1)]
     scale = float(np.nanstd(Y[days]))
@@ -120,6 +128,8 @@ def fit_bat(panel: Panel, train_idx: IntArray, C: FloatArray, n_iter: int = 2000
                           for k in range(KINDS)])
     ref = _ref(panel, days, kind, kind_mean, scale)
     X = channels(panel["X"]["생산량"][days, ::4], q_scale)  # (2, D, 24)
+    if not use_transfer:
+        X = np.zeros_like(X)
     obs = np.isfinite(Ys)
     dn, tn = np.nonzero(obs)
     y, kn = Ys[obs], kind[dn]
@@ -174,13 +184,13 @@ def fit_bat(panel: Panel, train_idx: IntArray, C: FloatArray, n_iter: int = 2000
         tau_rw = 1.0 / rng.gamma(1.0 + 48, 1.0 / (0.01 + 0.5 * np.einsum("kt,ts,ks->k", idle, RW, idle)))
 
         # attention shape + positive gains θ_k: random-walk Metropolis on the Gaussian (given 1/v) likelihood
-        for k in range(1, KINDS):
+        for k in range(1, KINDS) if use_transfer else ():
             m = np.flatnonzero(kn == k)
             if not len(m):
                 continue
             e = y[m] - coef[j[m]] - coef[G + k] * r[m]
 
-            def logp(th: FloatArray, m: IntArray = m, e: FloatArray = e) -> tuple[float, FloatArray]:
+            def logp(th: FloatArray, m: IntArray = m, e: FloatArray = e, wm: FloatArray = wm) -> tuple[float, FloatArray]:
                 tk = attended(th, m) @ np.exp(th[3:])
                 return (-0.5 * float(wm[m] @ (e - tk) ** 2)
                         - 0.5 * float((((th - PRIOR_MU) / PRIOR_SD) ** 2).sum()), tk)
@@ -204,7 +214,8 @@ def fit_bat(panel: Panel, train_idx: IntArray, C: FloatArray, n_iter: int = 2000
             rho = float(np.clip((wp * a) @ b / ((wp * a) @ a), 0.0, 0.99))
             out["rho"].append(rho)
             out["b_eta"].append(float(wp @ np.abs(b - rho * a) / wp.sum()))  # weighted Laplace MLE scale
-            for key, value in (("idle", idle), ("gam", coef[G:]), ("w", np.exp(theta[:, 3:]).T), ("theta", theta),
+            gains = np.exp(theta[:, 3:]).T if use_transfer else np.zeros((2, KINDS))
+            for key, value in (("idle", idle), ("gam", coef[G:]), ("w", gains), ("theta", theta),
                                ("sigma_u", np.sqrt(sig_u)), ("lam", np.sqrt(lam2))):
                 out[key].append(np.array(value, copy=True))
     return {"scale": scale, "q_scale": q_scale, "kind_mean": kind_mean, "C": C,
@@ -213,7 +224,8 @@ def fit_bat(panel: Panel, train_idx: IntArray, C: FloatArray, n_iter: int = 2000
 
 def _day_parts(state: BATMeanState, panel: Panel, d: int) -> tuple[int, FloatArray, FloatArray]:
     k = int(kinds(panel, np.array([d]))[0])
-    ref = _ref(panel, np.array([d]), np.array([k]), state["kind_mean"], state["scale"])[0]
+    ref = _ref(panel, np.array([d]), np.array([k]), state["kind_mean"], state["scale"],
+               state.get("ref_rule", "op"))[0]
     return k, ref, np.nan_to_num(panel["X"]["생산량"][d, ::4]) / state["q_scale"]
 
 
@@ -242,21 +254,6 @@ def plan_curves(state: BATMeanState, panel: Panel, d: int, q: FloatArray) -> Flo
     x = channels(q, state["q_scale"])  # (2, S, 24)
     base = state["idle"][:, k] + state["gam"][:, k, None] * ref
     return (base + np.einsum("sc,sth,csh->st", state["w"][:, :, k], alpha, x)) * state["scale"]
-
-
-def curve_fn(state: BATMeanState, panel: Panel, d: int) -> Callable[[torch.Tensor], torch.Tensor]:
-    """Posterior-mean curve ŷ(q), differentiable in the raw (24,) plan (on/off held at the day's plan)."""
-    k, ref, _ = _day_parts(state, panel, d)
-    on = torch.tensor(channels(panel["X"]["생산량"][d, ::4], state["q_scale"])[0])
-    alpha = torch.tensor(np.array([attention(th[k]) for th in state["theta"]]))
-    w = torch.tensor(state["w"][:, :, k])
-    base = torch.tensor((state["idle"][:, k] + state["gam"][:, k, None] * ref).mean(0))
-    denom = float(np.log1p(state["q_scale"]))
-
-    def f(q: torch.Tensor) -> torch.Tensor:
-        x = torch.stack([on, torch.log1p(q.to(torch.float64)) / denom])
-        return (base + torch.einsum("sc,sth,ch->st", w, alpha, x).mean(0)) * state["scale"]
-    return f
 
 
 def from_paths(samples: FloatArray, C: FloatArray) -> Prediction:
@@ -303,6 +300,7 @@ def _with_inner[S](fit: Callable[[Panel, IntArray, FloatArray], S]) -> Callable[
     return wrapped
 
 
-def bat_model(n_iter: int = 2000) -> Model[BATState]:
-    return {"name": "BAT", "fit": _with_inner(lambda p, tr, C: fit_bat(p, tr, C, n_iter, n_iter // 2)),
+def bat_model(n_iter: int = 2000, use_transfer: bool = True) -> Model[BATState]:
+    return {"name": "BAT" if use_transfer else "BAT_no_transfer",
+            "fit": _with_inner(lambda p, tr, C: fit_bat(p, tr, C, n_iter, n_iter // 2, use_transfer=use_transfer)),
             "predict": predict_bat, "inner_state": lambda state: state.get("inner_state")}

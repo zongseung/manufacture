@@ -10,6 +10,12 @@ LGB_PARAMS: Final = {"seed": 0, "deterministic": True, "force_col_wise": True, "
 QUANTILES: Final = np.round(np.arange(1, 20) * .05, 2)
 
 
+class LGBOverrides(TypedDict, total=False):
+    num_leaves: int
+    min_data_in_leaf: int
+    learning_rate: float
+
+
 class NaiveState(TypedDict):
     C: FloatArray
 
@@ -83,19 +89,21 @@ def _slot_data(
     return X[keep], y[keep], names
 
 
-def _quantile_boosters(data: lgb.Dataset, rounds: int) -> list[lgb.Booster]:
-    return [lgb.train({**LGB_PARAMS, "objective": "quantile", "alpha": float(q)}, data, num_boost_round=rounds) for q in QUANTILES]
+def _quantile_boosters(data: lgb.Dataset, rounds: int, params: LGBOverrides | None = None) -> list[lgb.Booster]:
+    return [lgb.train({**LGB_PARAMS, **(params or {}), "objective": "quantile", "alpha": float(q)},
+                      data, num_boost_round=rounds) for q in QUANTILES]
 
 
 def fit_b1(
     panel: Panel, train_idx: IntArray, protocol: str, backbone: tuple[float, int], C: FloatArray, rounds: int = 100,
+    params: LGBOverrides | None = None, day_params: LGBOverrides | None = None, day_rounds: int | None = None,
 ) -> B1State:
     from gmst.features import day_rows, usable_peak
 
     X, y, names = _slot_data(panel, train_idx, protocol, backbone)
     data = lgb.Dataset(X, y, free_raw_data=False)
-    mean = lgb.train({**LGB_PARAMS, "objective": "regression"}, data, num_boost_round=rounds)
-    quantiles = _quantile_boosters(data, rounds)
+    mean = lgb.train({**LGB_PARAMS, **(params or {}), "objective": "regression"}, data, num_boost_round=rounds)
+    quantiles = _quantile_boosters(data, rounds, params)
     days = train_idx[usable_peak(panel)[train_idx]]
     if not len(days):
         message = "B1 requires at least one usable daily peak in training"
@@ -103,7 +111,9 @@ def fit_b1(
     m = bb.asof_matrix(panel, days, *backbone, protocol)
     DX, _ = day_rows(panel, days, protocol, m)
     maxima = np.nanmax(panel["Y"][days], axis=1)
-    Mq = _quantile_boosters(lgb.Dataset(DX, maxima, free_raw_data=False), rounds)
+    peak_params = params if day_params is None else day_params
+    peak_rounds = rounds if day_rounds is None else day_rounds
+    Mq = _quantile_boosters(lgb.Dataset(DX, maxima, free_raw_data=False), peak_rounds, peak_params)
     classifiers: list[lgb.Booster | None] = []
     for j, threshold in enumerate(C):
         labels = (maxima > threshold).astype(float)
@@ -111,7 +121,8 @@ def fit_b1(
             print(f"B1: C{(50, 75, 90)[j]} single-class in training; risk = 1 - F_M(C)")
             classifiers.append(None)
         else:
-            classifiers.append(lgb.train({**LGB_PARAMS, "objective": "binary"}, lgb.Dataset(DX, labels), num_boost_round=rounds))
+            classifiers.append(lgb.train({**LGB_PARAMS, **(peak_params or {}), "objective": "binary"},
+                                         lgb.Dataset(DX, labels), num_boost_round=peak_rounds))
     return {"tau": backbone[0], "h": backbone[1], "protocol": protocol, "rounds": rounds,
             "C": C, "names": names, "n_rows": len(y), "train_idx": train_idx.copy(), "mean": mean,
             "q": quantiles, "Mq": Mq, "clf": classifiers}
@@ -134,15 +145,16 @@ def predict_b1(state: B1State, panel: Panel, d: int) -> Prediction:
             "risk_raw": risk, "Mq": Mq}
 
 
-def b1_model(tau: float, half_life: int, protocol: str = "A+", rounds: int = 100) -> Model[B1State]:
+def b1_model(tau: float, half_life: int, protocol: str = "A+", rounds: int = 100,
+             params: LGBOverrides | None = None) -> Model[B1State]:
     from gmst.features import inner_idx, role_idx
 
     def fit(panel: Panel, fold: str, C: FloatArray) -> B1State:
         tr = role_idx(panel, fold, "train")
         cal = inner_idx(panel, fold)
         before = tr[tr < cal[0]] if cal.size else tr
-        inner = fit_b1(panel, before, protocol, (tau, half_life), C, rounds)
-        state = fit_b1(panel, tr, protocol, (tau, half_life), C, rounds)
+        inner = fit_b1(panel, before, protocol, (tau, half_life), C, rounds, params)
+        state = fit_b1(panel, tr, protocol, (tau, half_life), C, rounds, params)
         state["inner_state"] = inner
         return state
 

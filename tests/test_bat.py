@@ -1,7 +1,6 @@
 from functools import cache
 
 import numpy as np
-import torch
 
 from gmst import bat
 from gmst import evaluate as ev
@@ -38,15 +37,10 @@ def test_prediction_contract_and_determinism() -> None:
     np.testing.assert_array_equal(pred["paths"], bat.predict_bat(state, panel, d)["paths"])
 
 
-def test_curve_fn_matches_posterior_mean_and_transfer() -> None:
+def test_transfer_is_non_negative() -> None:
     panel, state, d = fitted()
-    mean, T = bat.transfer_draws(state, panel, d)
+    _, T = bat.transfer_draws(state, panel, d)
     assert (T >= 0).all()  # 생산이 늘면 전력이 줄지 않는다 (w > 0, α ≥ 0)
-    q = torch.tensor(np.nan_to_num(panel["X"]["생산량"][d, ::4]), requires_grad=True)
-    f = bat.curve_fn(state, panel, d)
-    np.testing.assert_allclose(f(q).detach().numpy(), mean.mean(0), rtol=1e-8, atol=1e-8)
-    jac = torch.autograd.functional.jacobian(f, q.detach()).numpy()
-    np.testing.assert_allclose(jac, T.mean(0), rtol=1e-6, atol=1e-8)
 
 
 def test_groups_from_plan() -> None:
@@ -63,3 +57,21 @@ def test_groups_from_plan() -> None:
     assert (group[2, :60] == 4).all() and (group[2, 60:] == 3).all()
     assert (group[3, :92] == 6).all() and (group[3, 92:] == 5).all()
     assert bat.bat_model()["name"] == "BAT"
+
+
+def test_transfer_ablation_refits_without_production_response() -> None:
+    # Given the final half-life and a real fold, remove the transfer at fit time.
+    panel = ft.load_panel()
+    tr = ft.role_idx(panel, "f1", "train")
+    C, _ = ev.thresholds(panel, tr)
+    d = int(ft.role_idx(panel, "f1", "val")[0])
+    # When fitting the ablation and changing volume without changing operating type.
+    state = bat.fit_bat(panel, tr, C, n_iter=40, burn=20, use_transfer=False)
+    q = np.nan_to_num(panel["X"]["생산량"][d, ::4])
+    original = bat.plan_curves(state, panel, d, q)
+    changed = bat.plan_curves(state, panel, d, 2 * q)
+    # Then no transfer survives, and both mean curves are exactly equal.
+    assert np.count_nonzero(state["w"]) == 0
+    np.testing.assert_array_equal(original, changed)
+    assert np.isfinite(original).all()
+    assert bat.bat_model(use_transfer=False)["name"] == "BAT_no_transfer"

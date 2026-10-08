@@ -25,6 +25,21 @@ class ObservationGrid:
         phi = np.where(self.gap > 0, r ** self.gap, 0.)
         return phi, np.sqrt((1 - r * r) / (1 - phi * phi))
 
+    def transition_variance(self, rho: FloatArray, var: FloatArray) -> FloatArray:
+        """Var(e_t − ρ^s e_{t−s}) = Σ_{j<s} ρ^{2j} var[d, t−j] for e_t = ρ e_{t−1} + √var[d, t] η_t.
+
+        rho is per day, var is (days, 96); a day's first observation is stationary, var[d, t]/(1 − ρ²).
+        """
+        r = rho[self.day]
+        total = var[self.day, self.slot]
+        long = np.flatnonzero(self.gap > 1)
+        for j in range(1, self.gap.max(initial=0)):
+            long = long[self.gap[long] > j]
+            total[long] += r[long] ** (2 * j) * var[self.day[long], self.slot[long] - j]
+        first = self.gap == 0
+        total[first] /= 1 - r[first] ** 2
+        return total
+
     def whiten(self, values: FloatArray, weights: tuple[FloatArray, FloatArray]) -> FloatArray:
         phi, inv_sd = weights
         return (values - phi * values[self.previous]) * inv_sd

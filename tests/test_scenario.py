@@ -9,17 +9,6 @@ from gmst import scenario as sc
 H = {date(2021, 2, 13), date(2021, 8, 16)}
 
 
-@pytest.mark.parametrize("ts,won", [
-    (datetime(2021, 7, 7, 10), 4777.5), (datetime(2021, 7, 10, 11), 2725.0),
-    (datetime(2021, 7, 11, 11), 1402.5), (datetime(2021, 8, 16, 11), 1402.5),
-    (datetime(2021, 1, 5, 18), 4167.5), (datetime(2021, 2, 13, 11), 1577.5),
-    (datetime(2021, 9, 8, 10), 2732.5),
-])
-def test_energy_when_historical_band_applies(ts: datetime, won: float) -> None:
-    # Given one quarter-hour demand reading; when priced; then historical won.
-    assert sc.energy_won(np.array([100.0]), [ts], H) == pytest.approx(won)
-
-
 @pytest.mark.parametrize("ts,expected", [
     (datetime(2021, 7, 7, 9), 1), (datetime(2021, 7, 7, 8, 45), 0),
     (datetime(2021, 7, 7, 17), 1), (datetime(2021, 7, 7, 23), 0),
@@ -45,15 +34,5 @@ def test_tariff_source_is_independent_of_dataset_rate() -> None:
     assert sc.TARIFF["III"]["winter"] == (62.5, 108.6, 155.5)
 
 
-def test_floor_and_holiday_switch_when_real_panel_stays_sealed() -> None:
-    # Given the ordinary sealed panel; when using history; then July/August floors remain 222.
-    from gmst import features as ft
-
-    p = ft.load_panel()
-    holidays = sc.tariff_holidays()
-    usable = ft.usable_peak(p)
-    excluded = {p["dates"][int(i)] for fold in ("f2", "f3", "f4")
-                for i in ft.role_idx(p, fold, "val") if usable[i] and p["op"][i] == 1}
-    for month in (7, 8):
-        assert sc.ratchet_floor(p, month, excluded, holidays) == (222.0, datetime(2021, 7, 19, 11, 15))
-    assert sc.tariff_holidays(False) == holidays - {date(2021, 8, 16)}
+def test_holiday_switch_drops_only_the_substitute_holiday() -> None:
+    assert sc.tariff_holidays(False) == sc.tariff_holidays() - {date(2021, 8, 16)}

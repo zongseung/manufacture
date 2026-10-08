@@ -14,15 +14,14 @@ def test_package_paths() -> None:
     assert gmst.RESULTS == ROOT / "results"
 
 
-def test_dependencies_and_cuda_source() -> None:
+def test_dependencies() -> None:
     config = tomllib.loads((ROOT / "pyproject.toml").read_text())
     names = {re.split(r"[<>=!~\[ ;]", name)[0] for name in config["project"]["dependencies"]}
     assert "lightgbm" in names
     assert not names & {"requests", "scipy", "sklearn", "scikit-learn", "pandas", "pytest"}
     assert any(name.startswith("pytest") for name in config["dependency-groups"]["dev"])
     assert config["tool"]["pytest"]["ini_options"] == {"pythonpath": ["."], "testpaths": ["tests"]}
-    assert config["tool"]["uv"]["sources"]["torch"] == {"index": "pytorch-cu126"}
-    assert config["tool"]["uv"]["index"][0]["url"] == "https://download.pytorch.org/whl/cu126"
+    assert "torch" not in names  # CPU-only numpy/polars/lightgbm pipeline
 
 
 def test_production_code_has_no_banned_imports_or_credentials() -> None:
