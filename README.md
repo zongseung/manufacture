@@ -50,7 +50,7 @@ y_{d,t} = \underbrace{\mu_{k,t}}_{\text{기본곡선}} + \underbrace{\gamma_k\, 
 $$
 
 $$
-\alpha_{t,h} = \operatorname{sparsemax}_h\!\left(-\frac{\lvert \Delta_{t,h}-c\rvert^{\beta}}{\sigma}\right),\quad
+\alpha_{t,h} = \mathrm{sparsemax}_h\!\left(-\frac{\lvert \Delta_{t,h}-c\rvert^{\beta}}{\sigma}\right),\quad
 \Delta_{t,h}=\frac{t-1-4h-1.5}{4},\quad (\sigma,\beta,c)=(1.5,2,0)
 $$
 
