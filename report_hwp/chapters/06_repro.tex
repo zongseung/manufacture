@@ -1,0 +1,153 @@
+% 제6장 코드 구성 및 재현성 (배점 10). 명령 블록용 보조 매크로(다른 장과 이름이 겹치지 않게 six 접두어 사용): \sixopen 줄1 \\ 줄2 \sixclose
+\newcommand{\sixopen}{\begin{list}{}{\setlength{\leftmargin}{2em}\setlength{\topsep}{0.2ex}\setlength{\parsep}{0pt}\setlength{\itemsep}{0pt}}\item[]\raggedright\ttfamily\small}
+\newcommand{\sixclose}{\end{list}}
+\begingroup\setlength{\emergencystretch}{3em}
+
+\hwpchapter{6}{코드 구성 및 재현성}{10}
+
+\hwpsection{6.1 제출자료와 실행 환경}
+
+본 장은 평가자가 제출자료로 실행 환경을 만들고 제출 예측과 보고서의 표·그림을 다시 만드는 절차를 순서대로 설명한다. 모든 명령은 제출 코드의 최상위 폴더, 곧 \texttt{pyproject.toml}과 \texttt{uv.lock}이 들어 있는 폴더에서 입력한다. 실행에는 CPU만 쓰며 외부 자료 취득, 네트워크 호출, 자격증명이 필요하지 않다(라이브러리를 내려받는 설치 단계는 제외). 압축본의 구성은 \texttt{README.md}를 따른다.
+\begin{hwplist}
+\item 포함: \path{gmst/}(실행 코드 패키지), \path{tests/}(회귀 검사), \texttt{main.py}(제출 예측 실행 파일), \texttt{pyproject.toml}(사용 라이브러리), \texttt{uv.lock}(고정 버전), \texttt{requirements.txt}(uv를 쓰지 않는 환경용으로 같은 버전을 내보낸 파일), \texttt{README.md}, 원자료 \texttt{5. 자원 최적화 AI 데이터셋/okm\_augumented\_2021.csv}(폴더명과 파일명은 코드에 지정된 표기 그대로 둔다), 제출 예측 폴더 \path{results_v3/submission/}. 최상위 폴더의 \texttt{.python-version}은 Python 3.13을 지정한다.
+\item 제외: \texttt{.env}, \texttt{.venv}, \texttt{.git}, \texttt{.claude}, 노트북 소켓 파일, \path{results_v3/}의 나머지 대용량 절제 실험 결과 폴더
+\end{hwplist}
+
+압축본만으로 바로 재현되는 것은 제출 예측(6.3절)이다. 합산 평가(\texttt{pooled\_eval})는 저장된 중간 결과 \path{results_v3/attention_ablation}, \path{results_v3/final}, \path{results_v3/cbat_final}을 읽으며, 이 세 폴더는 제외 항목에 속해 압축본에 없다. 따라서 합산 평가와 보고서 표·그림을 다시 만들려면 6.4절 표의 앞 단계 명령으로 이 폴더들을 먼저 만들어야 한다. 한편 \path{results_v3/submission}과 \path{results_v3/cbat_final}에는 같은 설정(C-BAT, 6,000회 표집, 앞 3,000회 버림, 시드 0)을 9월 시험 구간에 적용한 시험 파일 \texttt{test\_slots.csv}, \texttt{test\_days.csv}, \texttt{test\_metrics.csv}가 들어 있으며, 파일 비교(\texttt{cmp})로 세 파일이 서로 같음을 확인하였다.
+
+\hwpsection{6.2 uv 설치와 실행 환경 구성}
+
+\textbf{(1) uv 설치 확인.} Windows에서는 시작 메뉴에서 PowerShell을, macOS에서는 터미널 앱을 실행하고 Linux에서는 터미널을 사용한다. 터미널은 아래 명령을 입력하고 실행 결과를 확인하는 창이다. 명령을 한 줄씩 붙여넣고 Enter를 누른다. 먼저 uv가 설치되어 있는지 확인한다.
+\sixopen uv -{}-version\sixclose
+\texttt{uv}와 버전 번호가 표시되면 설치 단계는 생략한다. 명령을 찾을 수 없다는 오류가 나오면 사용하는 운영체제에 해당하는 설치 명령 하나를 실행한 뒤 터미널을 닫았다가 다시 열고 \texttt{uv -{}-version}으로 확인한다.
+\begin{hwplist}
+\item Windows PowerShell(첫 줄), macOS·Linux(둘째 줄)
+\end{hwplist}
+\sixopen powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" \\
+curl -LsSf https://astral.sh/uv/install.sh | sh\sixclose
+\hwpnote{설치 명령 출처: uv 공식 설치 문서 \path{https://docs.astral.sh/uv/getting-started/installation/} (2026년 10월 8일 원문 열람).}
+
+\textbf{(2) 제출 코드 폴더로 이동.} \texttt{cd} 명령 뒤에 압축을 해제한 최상위 폴더의 경로를 입력한다. 아래 예시의 경로를 평가자 컴퓨터의 실제 경로로 바꾸며, 공백이 포함된 경로도 처리할 수 있도록 따옴표를 유지한다. 첫 줄은 Windows, 둘째 줄은 macOS·Linux 형식이다.
+\sixopen cd "C:\textbackslash{}path\textbackslash{}to\textbackslash{}manufacture" \\
+cd "/path/to/manufacture"\sixclose
+이동한 뒤 Windows PowerShell에서는 \texttt{dir}, macOS·Linux에서는 \texttt{ls}를 입력한다. 목록에 \texttt{pyproject.toml}, \texttt{uv.lock}, \texttt{gmst} 폴더가 함께 있으면 실행 위치가 맞다. 이후 명령도 같은 위치에서 입력한다.
+
+\textbf{(3) Python과 라이브러리 설치.} 본 프로젝트는 Python 3.13 이상을 쓴다. 아래 명령을 차례로 실행하여 Python을 준비하고 \texttt{uv.lock}에 고정된 버전으로 라이브러리를 설치한다. 최초 설치에는 인터넷 연결이 필요하다.
+\sixopen uv python install 3.13 \\
+uv sync -{}-locked\sixclose
+\texttt{uv sync -{}-locked}는 프로젝트 전용 실행 환경인 \texttt{.venv} 폴더를 만들고 \texttt{uv.lock}의 버전을 설치한다. 직접 의존하는 라이브러리는 numpy, polars, lightgbm, matplotlib 네 개이며 개발용으로 pytest와 ipykernel이 더해진다. 이후 \texttt{uv run}으로 실행하면 이 환경을 쓰므로 \texttt{.venv}를 따로 활성화할 필요가 없다. 아래 두 명령으로 환경 구성을 확인한다.
+\sixopen uv run -{}-locked python -{}-version \\
+uv run -{}-locked python -m gmst.run\_conditional -{}-help\sixclose
+첫 명령은 Python 3.13 계열의 버전을, 둘째 명령은 옵션 설명을 출력한다. \texttt{python -m gmst.run\_conditional}은 \path{gmst/run_conditional.py}를 실행한다는 뜻이며 다른 모듈도 같다.
+\hwpnote{작성 환경(uv 0.8.11, Python 3.13.6)에서 \texttt{uv lock -{}-check}는 오류 없이 종료되어(패키지 50개 해석) \texttt{uv.lock}이 \texttt{pyproject.toml}과 맞음을 확인하였고, \texttt{uv sync -{}-locked -{}-dry-run}은 ``Would make no changes''를 출력하였다. \texttt{pip install -r requirements.txt} 경로는 실행하지 않았다.}
+
+\hwpsection{6.3 제출 예측 재현}
+
+제출 예측은 아래 한 줄로 만든다. \texttt{main.py}는 원자료 전처리부터 학습, 추론, 결과 파일 쓰기까지 이어서 수행한다.
+\sixopen uv run -{}-locked python main.py\sixclose
+이 명령은 2021년 9월 1일 이전 자료로 최종 C-BAT를 적합하고(6,000회 표집, 앞 3,000회 버림, 시드 0) 9월 1--14일을 예측한다. 9월 시험 구간의 목표 전력은 기본 로더에서 가려져 있으며 이 실행에서 열린다. \texttt{README.md}는 CPU에서 약 1분이 걸린다고 적고 있다. 결과는 \path{results_v3/submission/}에 저장되며 같은 이름의 기존 파일을 덮어쓰므로, 압축본의 제출 파일과 비교하려면 실행 전에 이 폴더를 다른 이름으로 복사해 둔다. 산출 파일은 다음과 같다.
+\begin{hwplist}
+\item \texttt{test\_predictions.csv}: 제출 예측. 14일 $\times$ 96슬롯의 1,344행, 32개 열(표~\ref{tab:ch6-columns})
+\item \texttt{eval\_mask.csv}: 슬롯별 결측 표시. 실제 전력이 결측인 슬롯은 2021년 9월 8일 12:00과 12:15의 2개이므로 오차 계산의 대상은 1,342슬롯이다.
+\item \texttt{test\_metrics.csv}, \texttt{test\_metrics\_long.csv}, \texttt{test\_slots.csv}(1,344행), \texttt{test\_days.csv}(14행): 9월 시험 채점. \texttt{posterior\_summary.csv}, \texttt{posterior\_trace.csv}(3,000개 표본), \texttt{acceptance.csv}: 사후 표와 채택률
+\item \texttt{run\_status.json}: 실행 설정, 입력 자료·코드의 해시, 9월 개봉 여부, 정상 종료 표시(\texttt{status}가 \texttt{complete})
+\end{hwplist}
+
+\begin{table}[htbp]
+\hwptablefont
+\setlength{\tabcolsep}{4pt}
+\caption{\texttt{test\_predictions.csv}의 열(32개).}\label{tab:ch6-columns}
+\begin{tabular}{L{4.3cm}L{10.8cm}}
+\toprule
+열 & 내용 \\
+\midrule
+\texttt{datetime} & 슬롯 시작 시각(\texttt{YYYY.MM.DD HH:MM:SS}) \\
+\texttt{model} & 모형 이름. C-BAT의 코드 내 이름은 \texttt{BAT\_conditional\_gaussian\_fixed\_attention} \\
+\texttt{y\_mean}, \texttt{y\_median} & 슬롯 전력 예측 경로의 평균과 중앙값(kW). 점예측은 \texttt{y\_median} \\
+\texttt{q05}, \ldots, \texttt{q95} & 5\%p 간격의 예측 분위수 19개(kW). \texttt{q50}은 \texttt{y\_median}과 같다. \\
+\texttt{M\_hat\_median}, \texttt{M\_hat\_mean}, \texttt{peak\_time\_mode} & 그날 일 피크(경로 최댓값) 분포의 중앙값·평균(kW)과 경로별 피크 시각의 최빈값(\texttt{HH:MM}). 날짜별 값을 96행에 반복 \\
+\texttt{risk\_C50}, \texttt{risk\_C75}, \texttt{risk\_C90} & 일 피크가 기준값 C를 넘을 확률(보정하지 않은 경로 초과확률) \\
+\texttt{C50}, \texttt{C75}, \texttt{C90} & 피크 기준값(kW). 학습 기간 가동일 일 피크의 50·75·90\% 분위수 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+새 결과는 압축본에 저장된 \texttt{test\_metrics.csv}와 대조한다. 저장된 값은 슬롯 MAE 7.18 kW, RMSE 9.79 kW, 일 피크 MAE 8.93 kW이다.
+\hwpnote{9월 시험 구간은 이전 개발 단계에서 한 번 열린 적이 있어 완전한 미사용 구간이 아니다(1.4절).}
+
+\hwpsection{6.4 보고서 결과 재현}
+
+보고서의 표와 그림은 모듈 하나당 명령 하나로 다시 만들 수 있다. 표~\ref{tab:ch6-commands}의 명령은 모두 \texttt{uv run -{}-locked python -m} 뒤에 붙여 한 줄로 입력하며, 앞 단계의 출력 폴더를 뒤 단계가 읽으므로 표의 순서대로 실행한다. \texttt{run\_conditional}, \texttt{robustness}, \texttt{billing\_alarm}은 \texttt{-{}-workers}(기본 8)로 병렬 작업 수를 줄일 수 있다. 스레드를 1로 고정하지 않는 모듈이 있어 환경변수 \texttt{OMP\_NUM\_THREADS}를 1로 두기를 권한다(Windows PowerShell은 \texttt{\$env:OMP\_NUM\_THREADS = "1"}, macOS·Linux는 \texttt{export OMP\_NUM\_THREADS=1}).
+
+{\hwptablefont\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{longtable}{L{0.7cm}L{8.2cm}L{3.3cm}L{3.4cm}}
+\caption{보고서 결과와 재현 명령. 명령은 \texttt{uv run -{}-locked python -m} 뒤에 이어 쓴다.}\label{tab:ch6-commands}\\
+\toprule
+순서 & 명령 & 출력 폴더 & 대응 장·절 \\
+\midrule
+\endfirsthead
+\caption[]{보고서 결과와 재현 명령(계속).}\\
+\toprule
+순서 & 명령 & 출력 폴더 & 대응 장·절 \\
+\midrule
+\endhead
+\midrule
+\multicolumn{4}{r}{\footnotesize 다음 쪽에 계속}\\
+\endfoot
+\bottomrule
+\endlastfoot
+1 & \texttt{gmst.leakage\_v3} & \path{results_v3/ch1} & 1.4절 복사일 누수 진단 \\
+2 & \texttt{gmst.robustness -{}-out results\_v3/robustness} & \path{results_v3/robustness} & 2장 비교모형의 개발 구간 예측(3--6단계의 입력) \\
+3 & \texttt{gmst.run\_conditional -{}-attention-ablation -{}-source results\_v3/robustness -{}-n-iter 6000 -{}-burn 3000} & \path{results_v3/attention_ablation} & 2.3절 개발 구간 주 성능, 학습형 어텐션 비교 \\
+4 & \texttt{gmst.run\_conditional -{}-ref-comparison -{}-source results\_v3/robustness -{}-n-iter 6000 -{}-burn 3000} & \path{results_v3/ref_ablation} & 2.3절 절제: 기준일 규칙 \\
+5 & \texttt{gmst.run\_conditional -{}-pooled-noise-comparison -{}-source results\_v3/robustness -{}-n-iter 6000 -{}-burn 3000 -{}-out results\_v3/conditional\_collapsed} & \path{results_v3/conditional_collapsed} & 2.3절 절제: 공통 잡음 \\
+6 & \texttt{gmst.run\_conditional -{}-noise-comparison -{}-source results\_v3/robustness -{}-n-iter 6000 -{}-burn 3000} & \path{results_v3/noise_ablation} & 2.3절 잡음 변형 비교 \\
+7 & \texttt{gmst.peak\_conditions -{}-source results\_v3/attention\_ablation -{}-model BAT\_conditional\_gaussian\_fixed\_attention -{}-out results\_v3/peak\_conditions\_v2} & \path{results_v3/peak_conditions_v2} & 3장 피크가 생기는 조건과 조건별 오차 \\
+8 & \texttt{gmst.robustness -{}-models CBAT -{}-out results\_v3/plan\_sensitivity\_cbat} & \path{results_v3/plan_sensitivity_cbat} & 3장 생산계획 입력 오차 실험 \\
+9 & \texttt{gmst.run\_v3} 다음에 \texttt{gmst.report\_v3 -{}-results results\_v3} & \path{results_v3}, \path{results_v3/ch3} & 3장 기존 BAT·M2·B0 조건별 오차 \\
+10 & \texttt{gmst.analog\_days} & \path{results_v3/analog_days} & 4장 모형 반사실 절감액의 유사일 검증 \\
+11 & \texttt{gmst.billing\_alarm} & \path{results_v3/billing_alarm} & 4장 월 최대 갱신 경보 백테스트 \\
+12 & \texttt{gmst.run\_v3 -{}-final} & \path{results_v3/final} & 2.3절 9월 단독 결과(B0, M2, 기존 BAT) \\
+13 & \texttt{gmst.run\_conditional -{}-final -{}-n-iter 6000 -{}-burn 3000} & \path{results_v3/cbat_final} & 2.3절 9월 단독 결과(C-BAT). 14단계의 입력 \\
+14 & \texttt{gmst.pooled\_eval} & \path{results_v3/pooled_eval} & 2.2·2.3절 합산 평가 \\
+15 & \texttt{gmst.report\_tables} & \path{results_v3/report_tables} & 2.3절·3장 개발 구간 표 \\
+16 & \texttt{gmst.report\_figures} & \path{report/figs} & 1.2·2.1·2.3·3.2절 그림 \\
+\end{longtable}}
+
+표의 명령에 대해 다음을 유의한다.
+\begin{hwplist}
+\item 3--6단계는 \texttt{-{}-out}을 생략하면 출력 폴더 열의 폴더에 저장된다(5단계만 기본 저장 위치가 \path{results_v3/conditional}이라 \texttt{-{}-out}을 준다). \texttt{-{}-n-iter 6000 -{}-burn 3000}을 붙이지 않으면 기본값(표집 2,000회, 앞 1,000회 버림)으로 돌아 보고서의 설정과 달라진다. 13단계의 \texttt{-{}-final}은 9월을 여는 실행이다. 1, 10, 11단계는 저장된 다른 결과 없이 원자료에서 바로 계산하고, 16단계는 \path{report/figs}의 그림을 덮어쓴다.
+\item 14단계는 읽기만 하는 집계가 아니다. 개발 구간은 \path{results_v3/attention_ablation}의 시드 0--2 예측을, 9월의 C-BAT는 \path{results_v3/cbat_final}을 읽고, 9월의 B0·M2·기존 BAT는 동결된 설정(표집 2,000회, 부스팅 100회)으로 다시 적합하여 \path{results_v3/final}의 저장 예측과 같은지 검사(\texttt{allclose})한 뒤 쓴다. 이 과정에서 9월 시험 구간이 열리며 읽는 폴더는 코드에 고정되어 있다.
+\item 잡음 변형의 판정표(\texttt{noise\_table.csv} 등)는 \texttt{report\_tables}의 \texttt{noise\_ablation()} 함수가 만들며 명령줄 옵션으로 호출되지 않아 15단계에 포함되지 않는다. R², WAPE 등의 재채점은 \texttt{gmst.rescore -{}-source results\_v3/attention\_ablation}(선택)이다.
+\end{hwplist}
+
+결과 대조는 다음 파일에서 한다. 합산 평가는 \path{results_v3/pooled_eval/summary.csv}에서 \texttt{period}가 \texttt{all}인 행(67일, 6,358슬롯, 피크 평가일 65일)의 \texttt{slot\_mae}, \texttt{peak\_mae}를 2.3절의 합산 표와 맞춘다(C-BAT는 슬롯 MAE 8.22 kW, 피크 MAE 8.93 kW). 개발 구간 표는 \path{results_v3/report_tables}의 \texttt{t1\_main.csv}--\texttt{t7\_convergence.csv}에서 확인한다.
+\hwpnote{저장된 개발 예측을 현재 채점 함수로 다시 읽어 주요 비교 표와 부트스트랩을 대조한 확인(2026년 10월 4일)에서는 저장 수치와 일치하였다. 그러나 개발 비교의 실행 당시 소스 해시에는 현재 소스와 다른 항목이 있고, 현재 소스로 개발 학습 전체를 새로 돌려 비교하지는 않았으므로 학습을 새로 돌린 결과는 소수점 아래에서 다를 수 있다. \path{results_v3/cbat_final}의 \texttt{run\_status.json}은 소스 변경을 뜻하는 \texttt{complete\_source\_hash\_mismatch}이나 시험 파일은 제출 실행과 같다.}
+
+\hwpsection{6.5 누수 점검과 회귀 검사}
+
+누수는 자료 수준과 코드 수준에서 따로 점검하였다.
+\begin{hwplist}
+\item 자료 수준: 복사일 122일(완전 복사일 115일, 편집 복사일 7일)을 목표와 기준일에서 가리고, 무작위 5-fold와 복사 사건 단위 보류(LOEO)를 비교하는 명령이 표의 1단계이며 결과는 1.4절에 있다. 저장된 실행 기록의 실행 시간은 8.5분이다.
+\item 코드 수준: 모든 모형의 예측은 as-of 래퍼(\texttt{run\_v3.\_asof})를 거치며, 래퍼는 $d$일을 예측할 때 $d$일과 그 이후의 전력값을 결측으로 바꾸어 모형에 넘긴다. 검사는 이를 교란 실험으로 확인한다. 전력 행렬에서 $Y[d{:}]$를 $10^9$으로 바꾸어도 C-BAT의 예측 경로가 한 값도 바뀌지 않아야 통과한다(\path{tests/test_conditional_bat.py}). 기본곡선, 기준 모형, 경보 검사(\path{tests/test_backbone.py} 등)에도 같은 방식이 쓰였다.
+\item 9월 봉인: 기본 로더(\texttt{features.load\_panel})는 9월 1--14일의 목표와 입력을 가린다. 이 구간을 여는 경로는 \texttt{run\_v3}의 한 곳이며 \texttt{main.py}, \texttt{run\_conditional -{}-final}, \texttt{run\_v3 -{}-final}, \texttt{pooled\_eval}만 이 경로를 지난다. \texttt{run\_v3.py} 밖에서 \texttt{unseal=True}를 쓰면 \path{tests/test_style.py}가 실패한다.
+\end{hwplist}
+회귀 검사는 최상위 폴더에서 아래 명령으로 실행한다.
+\sixopen uv run -{}-locked pytest -q\sixclose
+이 원고를 쓰면서 실행한 결과는 \texttt{134 passed in 6.45s}였다(Python 3.13.6, 실패와 건너뜀 없음). 검사는 원자료 폴더가 필요하나 \path{results_v3/}의 저장 결과는 읽지 않아 압축본만으로 실행된다. 범위는 자료 정책, 모형 동작, 평가 지표, 요금·경보 규칙, 코드 규약이다.
+
+\hwpsection{6.6 실행 오류와 재실행 기준}
+
+오류가 발생하면 터미널의 마지막 오류 문구와 해당 단계가 만든 파일을 확인하고, 원인을 해결한 뒤 같은 명령을 다시 실행하여 정상 종료한 다음 단계로 진행한다.
+\begin{hwplist}
+\item uv를 찾을 수 없는 경우: 설치 후 터미널을 다시 열고 \texttt{uv -{}-version}을 확인한다. \texttt{pyproject.toml}이나 \texttt{gmst}, 원자료 CSV를 찾을 수 없는 경우에는 6.2절의 \texttt{cd} 명령으로 최상위 폴더로 이동하고 6.1절의 폴더명·파일명을 대조한다.
+\item 라이브러리를 불러오지 못하거나 잠금 파일 불일치 오류가 나는 경우: \texttt{uv sync -{}-locked}가 정상 완료되는지, \texttt{uv lock -{}-check}로 \texttt{pyproject.toml}과 \texttt{uv.lock}이 같은 제출본인지 확인한다.
+\item \texttt{oof\_slots.csv}, \texttt{oof\_days.csv}, \texttt{inner\_days.csv}, \texttt{test\_slots.csv} 등을 찾을 수 없다는 오류: 6.4절 표에서 그 파일을 만드는 앞 단계가 정상 종료되었는지와 출력 폴더 이름을 확인한다. \texttt{pooled\_eval}과 \texttt{report\_tables}는 읽는 폴더가 \path{results_v3/}의 하위로 고정되어 있다.
+\item \texttt{Sources changed during run}: 실행 중에 \path{gmst/}의 코드, \texttt{uv.lock}, 원자료가 바뀌었다는 뜻이므로 파일을 수정하지 않고 다시 실행한다. \texttt{pooled\_eval}의 \texttt{rerun differs from results\_v3/final}은 9월 B0·M2·기존 BAT의 재적합 예측이 12단계의 저장 예측과 다르다는 뜻이므로 12단계의 정상 종료 여부와 코드·라이브러리 버전을 확인한다.
+\end{hwplist}
+환경과 실행 경로만 먼저 확인할 때는 아래 축소 실행을 쓴다. 검증 구간 f1 하나에서 표집 400회, 부스팅 20회로 B0, M2, 기존 BAT를 평가하며 결과는 \path{quick_check/}에 저장된다. 작성 환경에서는 오류 없이 7초 만에 끝났다. 보고서 수치와 대조하지 않고, 확인 후 6.4절의 정식 명령을 실행한다.
+\sixopen uv run -{}-locked python -m gmst.run\_v3 -{}-quick -{}-folds f1 -{}-out quick\_check\sixclose
+코드나 표집 설정을 바꾸어 재실행할 때는 \texttt{-{}-out}으로 새 폴더(예: \texttt{repro\_rerun})를 지정하여 기존 결과와 섞지 않는다. 난수 시드는 코드에 고정되어 있으나 연산 환경에 따라 소수점 수준의 차이가 생길 수 있으므로, 결과가 다르면 입력 파일, 라이브러리 버전, 평가 행, 집계 조건을 먼저 대조한다.
+\hwpnote{이 원고에서 실행해 확인한 명령은 \texttt{uv lock -{}-check}, \texttt{uv sync -{}-locked -{}-dry-run}, \texttt{uv run -{}-locked pytest -q}, 옵션이 있는 모듈 9개의 \texttt{-{}-help}, 위 축소 실행이다. \texttt{main.py}와 6.4절 표의 학습·집계 명령은 실행하지 않았고 옵션은 코드의 인자 정의와 \texttt{run\_status.json}으로 대조하였다. 옵션이 없는 3개 모듈은 \texttt{-{}-help}가 곧 본 계산이라 확인하지 않았다.}
+\endgroup

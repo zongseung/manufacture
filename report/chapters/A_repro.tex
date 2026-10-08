@@ -33,7 +33,7 @@ uv run python main.py
 기준 모델 & \texttt{baselines}, \texttt{backbone}, \texttt{benchmark\_models} & B0, B0\_kind, LightGBM(기본·튜닝), RW2 기본곡선 \\
 모델 & \texttt{conditional\_bat}, \texttt{conditional\_ar}, \texttt{bat} & C-BAT, 결측 간격 AR(1) 우도, 기존 BAT·고정 커널 \\
 평가 & \texttt{evaluate}, \texttt{analysis}, \texttt{conditional\_diagnostics}, \texttt{rescore}, \texttt{robustness}, \texttt{leakage\_v3} & 지표, 부트스트랩, 수렴 진단, 기준 모델 예측, 누수 진단 \\
-피크·요금 & \texttt{peak\_conditions}, \texttt{plan\_sensitivity}, \texttt{analog\_days}, \texttt{billing\_alarm}, \texttt{scenario} & 피크 조건, 계획 민감도, 유사일 비교, 경보 백테스트, 2021 요금표 \\
+피크·요금 & \texttt{peak\_conditions}, \texttt{plan\_sensitivity}, \texttt{analog\_days}, \texttt{billing\_alarm}, \texttt{pooled\_eval}, \texttt{scenario} & 피크 조건, 계획 민감도, 유사일 비교, 경보 백테스트, 전체 기간 평가, 2021 요금표 \\
 러너 & \texttt{run\_conditional}, \texttt{run\_v3} & C-BAT 실험·비교·9월 예측, 기존 BAT 파이프라인 \\
 보고 & \texttt{report\_tables}, \texttt{report\_figures}, \texttt{report\_v3}, \texttt{paper\_figures} & 저장된 예측으로 표·그림 생성(재적합 없음) \\
 \bottomrule
@@ -61,6 +61,7 @@ C-BAT와 학습형 커널 비교, 주 성능표 & \texttt{run\_conditional -{}-a
 피크 발생·오차 조건 & \texttt{peak\_conditions}(인자는 표 아래) & \path{results_v3/peak_conditions_v2} \\
 유사일 비교 & \texttt{analog\_days} & \path{results_v3/analog_days} \\
 월 최대 갱신 경보 백테스트 & \texttt{billing\_alarm} & \path{results_v3/billing_alarm} \\
+시간순 검증 전체(개발+9월) 성능 & \texttt{pooled\_eval} & \path{results_v3/pooled_eval} \\
 보고서 표(주 성능, 피크 층별, 절제, 경보, 구간, 수렴) & \texttt{report\_tables} & \path{results_v3/report_tables} \\
 보고서 그림 & \texttt{report\_figures} & \path{report/figs} \\
 9월 제출 예측 & \texttt{main.py} & \path{results_v3/submission} \\
@@ -75,17 +76,41 @@ uv run python -m gmst.peak\_conditions -{}-source results\_v3/attention\_ablatio
 \quad -{}-model BAT\_conditional\_gaussian\_fixed\_attention -{}-out results\_v3/peak\_conditions\_v2
 \end{flushleft}
 
-각 실행은 설정, 입력 자료와 코드의 해시, 9월 구간 개봉 여부를 \texttt{run\_status.json}에 남긴다. 따라서 어떤 코드와 자료로 어떤 결과가 나왔는지 사후에 확인할 수 있다.
+학습 러너는 설정, 입력 자료와 코드의 해시, 9월 구간 개봉 여부를 \texttt{run\_status.json}에 남긴다. 재채점은 \texttt{manifest.json}의 입력·코드 해시로 어떤 저장 예측을 읽었는지 확인한다. 해시는 실행 당시의 출처를 기록한 것이며 현재 소스와 항상 같다는 뜻은 아니다.
+
+\subsection{본문 수치의 산출물 대응과 확인}
+
+표~\ref{tab:A-values}는 본문에 반영한 수치와 저장 산출물을 연결한다. 소수점 아래 두 자리로 표시한 MAE는 반올림 전 값을 사용해 차이·개선율·신뢰구간을 계산했다.
+\begin{table}[htbp]
+\centering
+\caption{핵심 수치와 저장 산출물의 대응. 모든 경로는 저장소 루트 기준이다.}
+\label{tab:A-values}
+\small
+\begin{tabular}{p{0.30\linewidth}p{0.62\linewidth}}
+\toprule
+본문 수치 & 산출물 \\
+\midrule
+합산 67일·6,358슬롯·피크 65일, 피크 MAE 8.93·13.09·14.54 kW & \path{results_v3/pooled_eval/summary.csv} \\
+합산 BAT 대비 $-4.17$, M2 대비 $-5.61$ kW 및 95\% 구간 & \path{results_v3/pooled_eval/paired_bootstrap.csv} \\
+개발 구간 주 성능·층별 피크·짝지은 bootstrap & \path{results_v3/report_tables/t1_main.csv}, \path{t2_peak_strata.csv}, \path{t3_paired_bootstrap.csv}(같은 폴더) \\
+절제·구간·수렴 진단 & \path{results_v3/report_tables/t4_ablation.csv}, \path{t6_intervals.csv}, \path{t7_convergence.csv}(같은 폴더) \\
+9월 1,342관측 슬롯과 제출 예측 & \path{results_v3/submission/test_metrics.csv}, \path{test_predictions.csv}(같은 폴더) \\
+경보 10회·오경보 9회·금액 상한 133,120원 & \path{results_v3/billing_alarm/days.csv}, \path{summary.csv}(같은 폴더) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+2026년 10월 4일 확인에서 저장된 개발 예측을 현재 채점 함수로 읽어 주요 비교 표와 날짜·7일 블록 bootstrap을 대조했고, 합산 평가의 날짜 손실과 4,000회 bootstrap도 재계산해 저장 수치와 일치함을 확인했다. 경보의 기준선·관측 피크와 집계도 관측 자료 및 코드의 규칙과 일치했다. 제출 실행의 기록된 소스 해시는 현재 소스와 같았다. 개발 비교의 실행 당시 소스 해시에는 현재와 다른 항목이 있어, 저장 예측의 재채점 검증과 현재 소스로 전체 학습을 재실행한 검증은 구별한다. 이번 원고 정리에서는 전체 개발 학습을 새로 수행하지 않았다.
 
 \subsection{자료 분할과 9월 봉인}
 
 자료는 날 단위로 나누고 시간 순서를 지킨다. 개발 구간은 2021년 7월 7일--8월 31일을 14일씩 네 fold(f1--f4)로 나눈 rolling origin 검증이다. 각 fold는 그 이전 날로만 학습한다. 시험 구간인 9월 1--14일의 전력값은 기본 로더에서 결측으로 봉인되어 있고 \texttt{main.py}와 \texttt{run\_conditional -{}-final}에서만 열린다.
 
-9월 구간은 두 번 열렸다. 첫 번째는 이전 버전(v2) 개발 중이었고 두 번째는 C-BAT를 동결한 뒤 한 번 연 것이다. C-BAT로 연 뒤에는 모델을 조정하거나 다시 돌리지 않았다. 그 뒤의 잡음 변형, 어텐션 기준일, 2계층 피크 모형, 앙상블 실험은 f1--f4에서만 사전 등록한 채택 규칙으로 평가했고 어느 것도 채택되지 않았다. 9월이 이미 한 번 열린 적이 있으므로 모델 선택의 근거는 f1--f4 결과로 둔다.
+9월 구간은 이전 버전(v2) 개발 중 이미 열린 적이 있으며, 이후 개발 구간에서 동결한 C-BAT를 적용했다. 보정 전 위험 발행과 제출 재현 실행에서도 C-BAT의 슬롯·피크 성능은 기존 동결 결과와 같았다. 잡음 변형, 어텐션 기준일, 2계층 피크 모형, 앙상블은 f1--f4에서만 사전 등록한 채택 규칙으로 평가했고 어느 것도 채택되지 않았다. 9월은 모델 선택 근거로 쓰지 않으며, 개발과 합친 성능 보고에 포함하더라도 완전히 미사용인 홀드아웃으로 부르지 않는다.
 
 \subsection{누수 점검}
 
-누수는 자료 수준과 코드 수준에서 따로 점검했다 \citep{kapoor2023leakage}. 자료 수준에서는 전력 곡선이 다른 날과 똑같은 복사일 122일을 찾아 목표와 기준일에서 가리고, 무작위 5-fold와 사건 단위 보류(LOEO)를 비교해 누수 규모를 쟀다(\texttt{leakage\_v3}). 무작위 교차검증은 LightGBM 기본 모형의 오차를 약 10\% 낮게 추정했다.
+누수는 자료 수준과 코드 수준에서 따로 점검했다 \citep{kapoor2023leakage}. 자료 수준에서는 완전 복사일 115일과 편집 복사일 7일, 총 122일을 찾아 목표와 기준일에서 가리고, 무작위 5-fold와 사건 단위 보류(LOEO)를 비교해 누수 규모를 쟀다(\texttt{leakage\_v3}). 무작위 교차검증은 LightGBM 기본 모형의 오차를 약 10\% 낮게 추정했다.
 
 코드 수준에서는 모든 모델의 예측이 as-of 래퍼를 거친다. 래퍼는 $d$일을 예측할 때 $d$일 이후의 전력값을 모델에 넘기지 않는다. 회귀 검사는 이를 교란 실험으로 확인한다. 전력 행렬에서 $Y[d{:}]$를 $10^9$으로 바꿔도 C-BAT의 예측 경로가 한 값도 바뀌지 않아야 통과한다(\path{tests/test_conditional_bat.py}). 같은 방식의 검사가 기본곡선(\path{tests/test_backbone.py})과 LightGBM 기준 모델(\path{tests/test_benchmark_models.py})에도 있다.
 
@@ -93,7 +118,11 @@ uv run python -m gmst.peak\_conditions -{}-source results\_v3/attention\_ablatio
 
 확률 모델은 시드 0·1·2로 세 번 적합하고 지표는 세 시드의 평균을 보고한다. 각 적합은 6,000회 반복하고 앞 3,000회를 버린다. 수렴은 기록한 모수 22개의 기본 split-$\widehat R$ \citep{gelman1992rhat,vehtari2021rhat}로 확인했고 모든 fold의 내부·외부 적합에서 최댓값이 1.03 이하였다. 9월 제출 예측은 시드 0 한 번의 적합이다.
 
-회귀 검사는 \texttt{uv run pytest -q}로 실행하며 133개가 모두 통과한다. 검사는 과거 기준일만 쓰는지, 튜닝·보정 구간이 분리되는지, 봉인된 날이 분석에서 빠지는지, 고정 커널과 상태별 잡음이 의도대로 동작하는지, 요금시간대 마스크가 요금표와 맞는지를 확인한다.
+회귀 검사는 \texttt{uv run pytest -q}로 실행한다. 2026년 10월 4일 현재 가상환경에서 다음 명령으로 134개가 통과했다.
+\begin{flushleft}\ttfamily\small
+.venv/bin/python -m pytest -q
+\end{flushleft}
+검사는 과거 기준일만 쓰는지, 튜닝·보정 구간이 분리되는지, 봉인된 날이 분석에서 빠지는지, 고정 커널과 상태별 잡음이 의도대로 동작하는지, 요금시간대 마스크가 요금표와 맞는지를 확인한다.
 
 \subsection{사전 등록 기록}
 
