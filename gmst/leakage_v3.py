@@ -13,13 +13,13 @@ from functools import cache
 import numpy as np
 import polars as pl
 
-from gmst import ROOT, backbone, baselines, bat
+from gmst import ROOT, backbone, baselines, bat, conditional_bat
 from gmst import evaluate as ev
 from gmst import features as ft
 from gmst.contracts import IntArray, Panel
 
 OUT = ROOT / "results_v3" / "ch1"
-MODELS = ("BAT", "M2")
+MODELS = ("BAT", "M2", "C-BAT")
 
 
 def build_folds(idx: IntArray, event: list[str], k: int = 5, seed: int = 0) -> dict[str, list[IntArray]]:
@@ -48,6 +48,10 @@ def _job(model: str, scheme: str, hold: IntArray) -> list[dict]:
         # ponytail: 진단용 1000/500 반복 (본 실험 2000/1000), 격차가 반복 수에 민감하면 전체 반복으로 재실행
         state = bat.fit_bat(masked, train, C, n_iter=1000, burn=500)
         pred = lambda d: bat.predict_bat(state, masked, d)["y_median"]  # noqa: E731
+    elif model == "C-BAT":
+        # same reduced 1000/500 iterations as BAT so the two Bayesian models are compared under one condition
+        state = conditional_bat.fit_conditional(masked, train, C, conditional_bat.ConditionalConfig(n_iter=1000, burn=500))
+        pred = lambda d: conditional_bat.predict_conditional(state, masked, d)["y_median"]  # noqa: E731
     else:
         state = baselines.fit_b1(masked, train, "B", bb, C, rounds=100)
         pred = lambda d: baselines.predict_b1(state, masked, d)["y_median"]  # noqa: E731
@@ -92,7 +96,7 @@ def _plot(table: pl.DataFrame, days: pl.DataFrame) -> None:
     _set_font()
     fig, (a, b) = plt.subplots(1, 2, figsize=(11, 4.2))
     for j, (scheme, label, color) in enumerate((("random5", "무작위 5-fold", "#9aa5b1"), ("loeo", "LOEO", "#2b6cb0"))):
-        t = table.filter(pl.col("scheme") == scheme).sort(pl.col("model").replace_strict({"BAT": 0, "M2": 1}))
+        t = table.filter(pl.col("scheme") == scheme).sort(pl.col("model").replace_strict({m: i for i, m in enumerate(MODELS)}))
         x = np.arange(len(MODELS)) + (j - 0.5) * 0.36
         mae = t["MAE"].to_numpy()
         a.bar(x, mae, 0.36, color=color, label=label,
@@ -138,15 +142,18 @@ def _summary(table: pl.DataFrame, n_events: int, n_multi: int, runtime: float) -
                      f"{g(m, 'random5_copygroup'):.2f} kW.")
     worst = max(-g(m, "random5", "gap") / g(m, "loeo") * 100 for m in MODELS)
     cg = {m: g(m, "random5_copygroup") - g(m, "loeo_copygroup") for m in MODELS}
+    verdict = {m: "낙관적(95% 구간이 0을 제외)" if g(m, "random5", "gap_hi") < 0 else "뚜렷한 차이 없음(95% 구간이 0을 포함)"
+               for m in MODELS}
     lines += [
-        f"- 해석: 복제군 날만 보면 격차(무작위−LOEO)는 BAT {cg['BAT']:+.2f} kW, M2 {cg['M2']:+.2f} kW. "
+        "- 해석: 복제군 날만 보면 격차(무작위−LOEO)는 " + ", ".join(f"{m} {cg[m]:+.2f} kW" for m in MODELS) + ". "
         "음수 격차 = 시험일의 복제본(같은 전력 곡선)이 학습에 들어간 무작위 CV가 성능을 낙관적으로 부풀림. "
         "M2(LightGBM, 이력·as-of 특징)는 복제본을 외워 이득을 보고, BAT(구조적 전달 모형)는 거의 영향이 없다.",
+        "- 전체 격차 기준 판정: " + ", ".join(f"{m} {verdict[m]}" for m in MODELS) + ".",
         "- LOEO에서도 복제군 날의 MAE가 단독 사건보다 크다: 이는 누수가 아니라 복제군 자체(날씨만 다른 편집 복제일)가 "
         "어려운 날이라는 뜻이므로, 격차는 반드시 같은 날끼리 쌍체 비교로 읽어야 한다.",
         f"- 결론: 순진한 무작위 CV는 모형에 따라 최대 {worst:.0f}% 낙관적이다. 본 실험에서 복제일 Y를 가리고(masking) "
         "시간 순서 fold(f1–f4 rolling origin)를 쓰는 근거다. 이 격차는 누수 진단이며 전방 예측 성능 추정치가 아니다.",
-        f"- 설정: BAT 1000/500 반복(진단용 축소), M2=B1(protocol B, rounds 100, τ/h는 f4 선택값 고정), "
+        f"- 설정: BAT·C-BAT 1000/500 반복(진단용 축소, 같은 조건), M2=B1(protocol B, rounds 100, τ/h는 f4 선택값 고정), "
         f"무작위 fold seed 0, CI는 일 단위 쌍체 부트스트랩 B=2000. 실행 시간 {runtime / 60:.1f}분.",
     ]
     (OUT / "summary.md").write_text("\n".join(lines) + "\n")

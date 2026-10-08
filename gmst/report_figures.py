@@ -39,15 +39,35 @@ def peak_hours_figure(days: pl.DataFrame) -> Figure:
 
 
 def model_compare_figure(t1: pl.DataFrame) -> Figure:
+    """Horizontal bars from zero; C-BAT highlighted, others neutral (identity is carried by the axis labels)."""
     fig, axes = plt.subplots(1, 3, figsize=(WIDTH, 1.9), sharey=True, layout="constrained")
     for ax, (col, title) in zip(axes, (("rmse", "Slot RMSE (kW)"), ("crps", "CRPS (kW)"), ("peak_mae", "Peak MAE (kW)")), strict=True):
-        for i, label in enumerate(LABELS):
-            value = t1.filter(pl.col("label") == label)[col].item()
+        values = [t1.filter(pl.col("label") == label)[col].item() for label in LABELS]
+        top = np.nanmax(values)
+        for i, (label, value) in enumerate(zip(LABELS, values, strict=True)):
             if np.isfinite(value):
-                ax.scatter(value, i, color=COLORS[label], s=28, zorder=3)
-                ax.annotate(f"{value:.1f}", (value, i), xytext=(0, 5), textcoords="offset points", ha="center", fontsize=7)
-        ax.set(title=title, yticks=range(4), yticklabels=LABELS, ylim=(3.6, -.7))
-        ax.margins(x=.2)
+                ax.barh(i, value, .62, color=COLORS["C-BAT"] if label == "C-BAT" else "#8e99a1")
+                ax.text(value + top * .02, i, f"{value:.1f}", va="center", fontsize=7)
+            else:  # B0_kind gives no distribution, so no CRPS
+                ax.text(top * .02, i, "n/a", va="center", fontsize=7, color="#707070")
+        ax.set(title=title, yticks=range(4), yticklabels=LABELS, ylim=(3.6, -.6), xlim=(0, top * 1.22))
+    return fig
+
+
+def model_compare_pooled_figure(pooled: pl.DataFrame) -> Figure:
+    """Same bar layout over the pooled 2021-07-07..09-14 evaluation; columns label, rmse, crps, peak_mae."""
+    labels = tuple(pooled["label"])
+    fig, axes = plt.subplots(1, 3, figsize=(WIDTH, 1.9), sharey=True, layout="constrained")
+    for ax, (col, title) in zip(axes, (("rmse", "Slot RMSE (kW)"), ("crps", "CRPS (kW)"), ("peak_mae", "Peak MAE (kW)")), strict=True):
+        values = pooled[col].to_list()
+        top = np.nanmax(values)
+        for i, (label, value) in enumerate(zip(labels, values, strict=True)):
+            if np.isfinite(value):
+                ax.barh(i, value, .62, color=COLORS["C-BAT"] if label == "C-BAT" else "#8e99a1")
+                ax.text(value + top * .02, i, f"{value:.1f}", va="center", fontsize=7)
+            else:  # B0 gives no distribution, so no CRPS
+                ax.text(top * .02, i, "n/a", va="center", fontsize=7, color="#707070")
+        ax.set(title=title, yticks=range(len(labels)), yticklabels=labels, ylim=(len(labels) - .4, -.6), xlim=(0, top * 1.22))
     return fig
 
 
@@ -122,6 +142,10 @@ def generate(out: Path = ROOT / "report/figs") -> list[Path]:
 
     days = read(R / "peak_conditions_v2/observed_days.csv")
     t1 = read(R / "report_tables/t1_main.csv").with_columns(pl.col("label").map_elements(table_label, return_dtype=pl.String))
+    full = read(R / "pooled_eval/full_metrics.csv").filter(pl.col("period") == "all")
+    peak = read(R / "pooled_eval/summary.csv").filter(pl.col("period") == "all").select("model", "peak_mae")
+    pooled = (full.join(peak, on="model", validate="1:1").rename({"model": "label"}).select("label", "rmse", "crps", "peak_mae")
+              .sort(pl.col("label").replace_strict({m: i for i, m in enumerate(("C-BAT", "BAT", "M2", "B0"))})))
     t2 = read(R / "report_tables/t2_peak_strata.csv").with_columns(pl.col("label").map_elements(table_label, return_dtype=pl.String))
     slots = pl.concat([read(R / "attention_ablation/seed0/oof_slots.csv").filter(pl.col("model") == CBAT).drop("seed"),
                        read(R / "robustness/oof_slots.csv").filter(pl.col("model").is_in(["BAT", "M2_tuned"]))])
@@ -131,6 +155,7 @@ def generate(out: Path = ROOT / "report/figs") -> list[Path]:
     examples = select_examples(slots, days)
     out.mkdir(parents=True, exist_ok=True)
     figures = {"peak_hours": lambda: peak_hours_figure(days), "model_compare": lambda: model_compare_figure(t1),
+               "model_compare_pooled": lambda: model_compare_pooled_figure(pooled),
                "peak_strata": lambda: peak_strata_figure(t2), "forecast_examples": lambda: forecast_figure(slots, examples),
                "noise_state": lambda: noise_figure(traces)}
     paths = []
